@@ -22,7 +22,8 @@ import { RepoRegistry } from "./registry/repo-registry.js";
 import { FleetError } from "./rpc/errors.js";
 import { EventLog } from "./store/event-log.js";
 import { FleetState, type TaskCreatedPayload, type TaskStatePayload } from "./store/state.js";
-import { FakeWorkerBackend, type WorkerBackend } from "./workers/backend.js";
+import type { WorkerBackend } from "./workers/backend.js";
+import { workerBackendFromEnv } from "./workers/codex-backend.js";
 import { WorktreeManager } from "./worktree/worktree-manager.js";
 
 export class FleetService {
@@ -36,7 +37,7 @@ export class FleetService {
 
   constructor(
     readonly paths: FleetPaths,
-    private readonly workerBackend: WorkerBackend = new FakeWorkerBackend(),
+    private readonly workerBackend: WorkerBackend = workerBackendFromEnv(),
     private readonly staleAfterMs = 5 * 60 * 1000
   ) {
     this.eventLog = new EventLog(paths.eventsPath);

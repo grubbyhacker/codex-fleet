@@ -15,6 +15,7 @@
     "./store": "./src/store/event-log.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@codex-fleet/shared": "workspace:*",
     "zod": "4.4.3"
   }
