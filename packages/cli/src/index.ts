@@ -1,6 +1,8 @@
 import {
+  callDaemon,
   clientRoleSchema,
   createClient,
+  readClientToken,
   resolveFleetPaths,
   startDaemon
 } from "@codex-fleet/daemon";
@@ -56,4 +58,55 @@ if (import.meta.main) {
     process.on("SIGINT", () => void stop());
     process.on("SIGTERM", () => void stop());
   }
+
+  if (command === "list") {
+    console.log(JSON.stringify(await callDaemon(loadRpcOptions(), "list_tasks", {}), null, 2));
+  }
+
+  if (command === "status") {
+    const taskId = subcommand;
+    if (!taskId) {
+      throw new Error("Usage: codex-fleet status <taskId>");
+    }
+    console.log(
+      JSON.stringify(await callDaemon(loadRpcOptions(), "get_task", { taskId }), null, 2)
+    );
+  }
+
+  if (command === "logs") {
+    const taskId = subcommand;
+    if (!taskId) {
+      throw new Error("Usage: codex-fleet logs <taskId>");
+    }
+    console.log(
+      JSON.stringify(await callDaemon(loadRpcOptions(), "get_task_history", { taskId }), null, 2)
+    );
+  }
+
+  if (command === "watch") {
+    const taskId = subcommand;
+    if (!taskId) {
+      throw new Error("Usage: codex-fleet watch <taskId>");
+    }
+    console.log(
+      JSON.stringify(
+        await callDaemon(loadRpcOptions(), "wait_tasks", {
+          taskIds: [taskId],
+          maxWaitSeconds: Number(process.env.CODEX_FLEET_WATCH_SECONDS ?? "5")
+        }),
+        null,
+        2
+      )
+    );
+  }
+}
+
+function loadRpcOptions(): { socketPath: string; clientId: string; token: string } {
+  const paths = resolveFleetPaths();
+  const clientId = process.env.CODEX_FLEET_CLIENT_ID ?? "cli";
+  return {
+    socketPath: paths.socketPath,
+    clientId,
+    token: process.env.CODEX_FLEET_TOKEN ?? readClientToken(paths, clientId)
+  };
 }
