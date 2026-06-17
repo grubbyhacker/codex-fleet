@@ -1,0 +1,33 @@
+{
+  "name": "codex-fleet",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "spike:bun": "bun run scripts/spike-bun.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/bun": "1.3.14",
+    "@types/node": "25.9.3",
+    "eslint": "10.5.0",
+    "prettier": "3.8.4",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.61.1",
+    "vitest": "4.1.9"
+  }
+}

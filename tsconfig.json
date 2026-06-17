@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "noEmit": true,
+    "paths": {
+      "@codex-fleet/shared": ["packages/shared/src/index.ts"]
+    }
+  },
+  "include": ["packages/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
+}

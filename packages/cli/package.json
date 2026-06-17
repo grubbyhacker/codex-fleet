@@ -1,0 +1,13 @@
+{
+  "name": "@codex-fleet/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "codex-fleet": "./src/index.ts"
+  },
+  "dependencies": {
+    "@codex-fleet/shared": "workspace:*",
+    "zod": "4.4.3"
+  }
+}

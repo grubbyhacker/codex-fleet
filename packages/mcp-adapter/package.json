@@ -1,0 +1,14 @@
+{
+  "name": "@codex-fleet/mcp-adapter",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "codex-fleet-mcp": "./src/index.ts"
+  },
+  "dependencies": {
+    "@codex-fleet/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "4.4.3"
+  }
+}

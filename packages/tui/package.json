@@ -1,0 +1,12 @@
+{
+  "name": "@codex-fleet/tui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "codex-fleet-tui": "./src/index.ts"
+  },
+  "dependencies": {
+    "@codex-fleet/shared": "workspace:*"
+  }
+}
