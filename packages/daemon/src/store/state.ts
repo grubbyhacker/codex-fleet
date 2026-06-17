@@ -10,6 +10,7 @@ export type TaskCreatedPayload = Omit<DelegateTaskRequest, "prompt"> & {
   ownerSession: OwnerSession;
   createdAt: string;
   promptPreview: string;
+  actualModel: TaskSnapshot["actualModel"];
 };
 
 export type TaskStatePayload = {
@@ -52,7 +53,8 @@ export class FleetState {
           risk: payload.risk,
           state: "queued",
           ownerSession: payload.ownerSession,
-          requestedModel: payload.modelTier
+          requestedModel: payload.modelTier,
+          actualModel: payload.actualModel
         })
       );
       return;

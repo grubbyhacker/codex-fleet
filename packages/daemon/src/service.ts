@@ -109,6 +109,7 @@ export class FleetService {
     const taskId = randomUUID();
     const createdAt = new Date().toISOString();
     const ownerSession = this.ownerFor(clientId);
+    const actualModel = routeModelTier(request);
     let branch: string | undefined;
     let worktreePath: string | undefined;
 
@@ -135,6 +136,7 @@ export class FleetService {
       risk: request.risk,
       resumeTaskId: request.resumeTaskId,
       modelTier: request.modelTier,
+      actualModel,
       promptPreview: preview(request.prompt),
       ownerSession,
       createdAt
@@ -227,6 +229,17 @@ export class FleetService {
 
 function preview(value: string, maxLength = 240): string {
   return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
+}
+
+function routeModelTier(request: ReturnType<typeof delegateTaskRequestSchema.parse>) {
+  if (
+    request.risk === "high" ||
+    request.deliveryMode === "full_delivery" ||
+    request.deliveryMode === "push_to_main"
+  ) {
+    return "strong";
+  }
+  return request.modelTier ?? "standard";
 }
 
 async function sleep(ms: number): Promise<void> {
