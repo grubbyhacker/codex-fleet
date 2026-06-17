@@ -16,6 +16,7 @@ import {
   type TargetDescriptor
 } from "@codex-fleet/shared";
 
+import { CleanupManager } from "./cleanup/cleanup-manager.js";
 import type { FleetPaths } from "./paths.js";
 import { RepoRegistry } from "./registry/repo-registry.js";
 import { FleetError } from "./rpc/errors.js";
@@ -29,6 +30,7 @@ export class FleetService {
   private readonly state: FleetState;
   private readonly registry: RepoRegistry;
   private readonly worktrees: WorktreeManager;
+  private readonly cleanup = new CleanupManager();
   private nextSeq: number;
   private readonly sessions = new Map<string, OwnerSession>();
 
@@ -80,8 +82,10 @@ export class FleetService {
       }
       case "end_task": {
         const request = endTaskRequestSchema.parse(params);
-        this.requireTask(envelope.clientId, request.taskId);
-        return { accepted: true, taskId: request.taskId };
+        const task = this.requireTask(envelope.clientId, request.taskId);
+        const repo = "repo" in task.target ? this.registry.get(task.target.repo) : undefined;
+        const cleanup = this.cleanup.releaseWorktree(task, repo);
+        return { accepted: true, taskId: request.taskId, cleanup };
       }
     }
   }
