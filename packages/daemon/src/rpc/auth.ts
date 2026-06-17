@@ -64,6 +64,8 @@ export function ensureStateLayout(paths: FleetPaths): void {
   chmodSync(paths.clientsDir, 0o700);
   mkdirSync(paths.tasksDir, { mode: 0o700, recursive: true });
   chmodSync(paths.tasksDir, 0o700);
+  mkdirSync(paths.worktreesDir, { mode: 0o700, recursive: true });
+  chmodSync(paths.worktreesDir, 0o700);
 }
 
 export function tokenPath(paths: FleetPaths, clientId: string): string {

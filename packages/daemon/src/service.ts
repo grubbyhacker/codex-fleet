@@ -17,20 +17,30 @@ import {
 } from "@codex-fleet/shared";
 
 import type { FleetPaths } from "./paths.js";
+import { RepoRegistry } from "./registry/repo-registry.js";
 import { FleetError } from "./rpc/errors.js";
 import { EventLog } from "./store/event-log.js";
 import { FleetState, type TaskCreatedPayload, type TaskStatePayload } from "./store/state.js";
+import { FakeWorkerBackend, type WorkerBackend } from "./workers/backend.js";
+import { WorktreeManager } from "./worktree/worktree-manager.js";
 
 export class FleetService {
   private readonly eventLog: EventLog;
   private readonly state: FleetState;
+  private readonly registry: RepoRegistry;
+  private readonly worktrees: WorktreeManager;
   private nextSeq: number;
   private readonly sessions = new Map<string, OwnerSession>();
 
-  constructor(readonly paths: FleetPaths) {
+  constructor(
+    readonly paths: FleetPaths,
+    private readonly workerBackend: WorkerBackend = new FakeWorkerBackend()
+  ) {
     this.eventLog = new EventLog(paths.eventsPath);
     const events = this.eventLog.readAll();
     this.state = FleetState.replay(events);
+    this.registry = RepoRegistry.load(paths);
+    this.worktrees = new WorktreeManager(paths);
     this.nextSeq = events.reduce((max, event) => Math.max(max, event.seq), -1) + 1;
   }
 
@@ -75,32 +85,43 @@ export class FleetService {
   }
 
   private listTargets(): TargetDescriptor[] {
-    return [
-      {
-        id: "shell",
-        target: { shell: true },
-        title: "Host shell",
-        defaultModelTier: "standard",
-        availableModelTiers: ["cheap", "standard", "strong"]
-      }
-    ];
+    const shellTarget: TargetDescriptor = {
+      id: "shell",
+      target: { shell: true },
+      title: "Host shell",
+      defaultModelTier: "standard",
+      availableModelTiers: ["cheap", "standard", "strong"]
+    };
+    return [shellTarget].concat(this.registry.listDescriptors());
   }
 
   private delegateTask(
     clientId: string,
     request: ReturnType<typeof delegateTaskRequestSchema.parse>
   ): { taskId: string } {
-    if ("repo" in request.target) {
-      throw new FleetError(
-        "not_found",
-        `Unknown repo target "${request.target.repo}"`,
-        "list_targets"
-      );
-    }
-
     const taskId = randomUUID();
     const createdAt = new Date().toISOString();
     const ownerSession = this.ownerFor(clientId);
+    let branch: string | undefined;
+    let worktreePath: string | undefined;
+
+    if ("repo" in request.target) {
+      const repo = this.registry.get(request.target.repo);
+      if (!repo) {
+        throw new FleetError(
+          "not_found",
+          `Unknown repo target "${request.target.repo}"`,
+          "list_targets"
+        );
+      }
+
+      if (request.deliveryMode !== "research_only") {
+        const resource = this.worktrees.create(repo, taskId);
+        branch = resource.branch;
+        worktreePath = resource.worktreePath;
+      }
+    }
+
     this.append("task_created", taskId, {
       target: request.target,
       deliveryMode: request.deliveryMode,
@@ -111,14 +132,18 @@ export class FleetService {
       ownerSession,
       createdAt
     } satisfies TaskCreatedPayload);
+    if (branch || worktreePath) {
+      this.append("task_resource", taskId, { branch, worktreePath });
+    }
     this.append("task_state", taskId, {
       state: "running",
       lastActivityAt: createdAt
     } satisfies TaskStatePayload);
+    const result = this.workerBackend.run({ taskId, request, branch, worktreePath });
     this.append("task_state", taskId, {
       state: "exited",
-      exitCode: 0,
-      finalResponsePreview: `fake worker accepted ${request.deliveryMode} task`,
+      exitCode: result.exitCode,
+      finalResponsePreview: result.finalResponsePreview,
       lastActivityAt: new Date().toISOString()
     } satisfies TaskStatePayload);
 
