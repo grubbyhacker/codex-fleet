@@ -77,14 +77,18 @@ export function createAdapterServer(options = loadAdapterOptions()): McpServer {
   return server;
 }
 
-if (process.argv.includes("--probe")) {
-  const server = createAdapterServer();
-  console.log(JSON.stringify({ ok: true, server: server.constructor.name }));
-}
-
-if (!process.argv.includes("--probe")) {
-  const server = createAdapterServer();
-  await server.connect(new StdioServerTransport());
+if (import.meta.main) {
+  if (process.argv.includes("--probe")) {
+    const server = createAdapterServer({
+      clientId: "probe",
+      token: "probe",
+      socketPath: "/tmp/codex-fleet-probe.sock"
+    });
+    console.log(JSON.stringify({ ok: true, server: server.constructor.name }));
+  } else {
+    const server = createAdapterServer();
+    await server.connect(new StdioServerTransport());
+  }
 }
 
 function loadAdapterOptions(): AdapterOptions {

@@ -15,23 +15,25 @@ export function daemonProbe(): { ok: true; knownTaskStates: string[] } {
   };
 }
 
-if (process.argv.includes("--probe")) {
-  console.log(JSON.stringify(daemonProbe()));
-}
-
-if (process.argv[2] === "run") {
-  if (typeof process.getuid === "function" && process.getuid() === 0) {
-    console.error("codex-fleet daemon must not run as root");
-    process.exit(1);
+if (import.meta.main) {
+  if (process.argv.includes("--probe")) {
+    console.log(JSON.stringify(daemonProbe()));
   }
 
-  const daemon = await startDaemon(resolveFleetPaths());
-  console.error(`codex-fleet daemon listening on ${daemon.socketPath}`);
+  if (process.argv[2] === "run") {
+    if (typeof process.getuid === "function" && process.getuid() === 0) {
+      console.error("codex-fleet daemon must not run as root");
+      process.exit(1);
+    }
 
-  const stop = async () => {
-    await daemon.close();
-    process.exit(0);
-  };
-  process.on("SIGINT", () => void stop());
-  process.on("SIGTERM", () => void stop());
+    const daemon = await startDaemon(resolveFleetPaths());
+    console.error(`codex-fleet daemon listening on ${daemon.socketPath}`);
+
+    const stop = async () => {
+      await daemon.close();
+      process.exit(0);
+    };
+    process.on("SIGINT", () => void stop());
+    process.on("SIGTERM", () => void stop());
+  }
 }
