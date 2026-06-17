@@ -5,6 +5,8 @@
     "ignoreDeprecations": "6.0",
     "noEmit": true,
     "paths": {
+      "@codex-fleet/daemon": ["packages/daemon/src/index.ts"],
+      "@codex-fleet/daemon/*": ["packages/daemon/src/*"],
       "@codex-fleet/shared": ["packages/shared/src/index.ts"]
     }
   },

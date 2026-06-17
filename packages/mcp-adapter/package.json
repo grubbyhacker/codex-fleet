@@ -7,6 +7,7 @@
     "codex-fleet-mcp": "./src/index.ts"
   },
   "dependencies": {
+    "@codex-fleet/daemon": "workspace:*",
     "@codex-fleet/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "1.29.0",
     "zod": "4.4.3"
