@@ -30,3 +30,18 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 - Removed the operational handoff DCR and clarified in `AGENTS.md` that DCRs are only for product/design changes.
 - Verified `format:check`, aggregate `check`, and no diff to `docs/DESIGN.md`.
 - Updated the plan to call for periodic, logical commits at reviewable implementation boundaries.
+
+## 2026-06-17 V1 Implementation
+
+### About To Do
+
+- Continue from the v1 plan without stopping for implementation-level decisions.
+- Build reviewable slices with commits and keep paid Codex E2E opt-in only.
+
+### Did
+
+- Implemented the Phase 1 secure daemon RPC slice: scoped token auth, audit JSONL, durable event replay, fake worker, and stateless MCP adapter proxy.
+- Added repo registry, task worktree creation, worker backend seam, bounded waits, stale detection, cleanup-on-`end_task`, and read-only CLI views.
+- Added opt-in real Codex worker backend and `test:e2e:codex`; normal checks skip paid E2E.
+- Added model-tier routing records for requested vs actual tier with safe upgrades.
+- Created logical commits for each verified slice.
