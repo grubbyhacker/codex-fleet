@@ -1,5 +1,19 @@
 import { z } from "zod";
 
+export const initializeRequestSchema = z.object({
+  sessionName: z.string().min(1).optional()
+});
+export type InitializeRequest = z.infer<typeof initializeRequestSchema>;
+
+export const initializeResponseSchema = z.object({
+  accepted: z.literal(true),
+  ownerSession: z.object({
+    clientId: z.string().min(1),
+    sessionName: z.string().min(1).optional()
+  })
+});
+export type InitializeResponse = z.infer<typeof initializeResponseSchema>;
+
 export const deliveryModeSchema = z.enum([
   "research_only",
   "patch",
@@ -37,6 +51,23 @@ export const shellTargetSchema = z.object({
 export const targetSchema = z.union([repoTargetSchema, shellTargetSchema]);
 export type Target = z.infer<typeof targetSchema>;
 
+export const targetDescriptorSchema = z.object({
+  id: z.string().min(1),
+  target: targetSchema,
+  title: z.string().min(1),
+  defaultModelTier: modelTierSchema,
+  availableModelTiers: z.array(modelTierSchema).min(1),
+  verifyCommands: z.array(z.string().min(1)).optional(),
+  defaultBranch: z.string().min(1).optional(),
+  branchProtected: z.boolean().optional()
+});
+export type TargetDescriptor = z.infer<typeof targetDescriptorSchema>;
+
+export const listTargetsResponseSchema = z.object({
+  targets: z.array(targetDescriptorSchema)
+});
+export type ListTargetsResponse = z.infer<typeof listTargetsResponseSchema>;
+
 export const ownerSessionSchema = z.object({
   clientId: z.string().min(1),
   sessionName: z.string().min(1).optional()
@@ -52,6 +83,11 @@ export const delegateTaskRequestSchema = z.object({
   prompt: z.string().min(1)
 });
 export type DelegateTaskRequest = z.infer<typeof delegateTaskRequestSchema>;
+
+export const getTaskRequestSchema = z.object({
+  taskId: z.string().min(1)
+});
+export type GetTaskRequest = z.infer<typeof getTaskRequestSchema>;
 
 export const taskIdResponseSchema = z.object({
   taskId: z.string().min(1)
@@ -76,6 +112,11 @@ export const taskSnapshotSchema = z.object({
   actualModel: modelTierSchema.optional()
 });
 export type TaskSnapshot = z.infer<typeof taskSnapshotSchema>;
+
+export const getTaskResponseSchema = z.object({
+  task: taskSnapshotSchema
+});
+export type GetTaskResponse = z.infer<typeof getTaskResponseSchema>;
 
 export const eventSchema = z.object({
   taskId: z.string().min(1),
@@ -102,10 +143,102 @@ export const waitTasksResponseSchema = z.object({
 });
 export type WaitTasksResponse = z.infer<typeof waitTasksResponseSchema>;
 
+export const listTasksRequestSchema = z.object({
+  states: z.array(taskStateSchema).optional(),
+  targetId: z.string().min(1).optional()
+});
+export type ListTasksRequest = z.infer<typeof listTasksRequestSchema>;
+
+export const listTasksResponseSchema = z.object({
+  tasks: z.array(taskSnapshotSchema)
+});
+export type ListTasksResponse = z.infer<typeof listTasksResponseSchema>;
+
+export const getTaskHistoryRequestSchema = z.object({
+  taskId: z.string().min(1),
+  limit: z.number().int().positive().max(200).optional()
+});
+export type GetTaskHistoryRequest = z.infer<typeof getTaskHistoryRequestSchema>;
+
+export const getTaskHistoryResponseSchema = z.object({
+  events: z.array(eventSchema)
+});
+export type GetTaskHistoryResponse = z.infer<typeof getTaskHistoryResponseSchema>;
+
+export const endTaskRequestSchema = z.object({
+  taskId: z.string().min(1),
+  reason: z.string().min(1).optional()
+});
+export type EndTaskRequest = z.infer<typeof endTaskRequestSchema>;
+
+export const endTaskResponseSchema = z.object({
+  accepted: z.literal(true),
+  taskId: z.string().min(1)
+});
+export type EndTaskResponse = z.infer<typeof endTaskResponseSchema>;
+
+export const daemonMethodSchema = z.enum([
+  "initialize",
+  "list_targets",
+  "delegate_task",
+  "get_task",
+  "wait_tasks",
+  "list_tasks",
+  "get_task_history",
+  "end_task"
+]);
+export type DaemonMethod = z.infer<typeof daemonMethodSchema>;
+
+export const daemonSuccessResponseSchema = z.object({
+  requestId: z.string().min(1),
+  ok: z.literal(true),
+  result: z.unknown()
+});
+export type DaemonSuccessResponse = z.infer<typeof daemonSuccessResponseSchema>;
+
+export const daemonErrorCodeSchema = z.enum([
+  "bad_request",
+  "unauthenticated",
+  "forbidden",
+  "not_found",
+  "conflict",
+  "internal_error"
+]);
+export type DaemonErrorCode = z.infer<typeof daemonErrorCodeSchema>;
+
+export const daemonErrorResponseSchema = z.object({
+  requestId: z.string().min(1).optional(),
+  ok: z.literal(false),
+  error: z.object({
+    code: daemonErrorCodeSchema,
+    message: z.string().min(1),
+    nextCall: z.string().min(1).optional()
+  })
+});
+export type DaemonErrorResponse = z.infer<typeof daemonErrorResponseSchema>;
+
+export const daemonResponseSchema = z.union([
+  daemonSuccessResponseSchema,
+  daemonErrorResponseSchema
+]);
+export type DaemonResponse = z.infer<typeof daemonResponseSchema>;
+
 export const rpcEnvelopeSchema = z.object({
   requestId: z.string().min(1),
   clientId: z.string().min(1),
-  method: z.string().min(1),
+  token: z.string().min(1),
+  method: daemonMethodSchema,
   params: z.unknown().optional()
 });
 export type RpcEnvelope = z.infer<typeof rpcEnvelopeSchema>;
+
+export const methodParamsSchemas = {
+  initialize: initializeRequestSchema,
+  list_targets: z.object({}).optional(),
+  delegate_task: delegateTaskRequestSchema,
+  get_task: getTaskRequestSchema,
+  wait_tasks: waitTasksRequestSchema,
+  list_tasks: listTasksRequestSchema.optional(),
+  get_task_history: getTaskHistoryRequestSchema,
+  end_task: endTaskRequestSchema
+} satisfies Record<DaemonMethod, z.ZodType>;
