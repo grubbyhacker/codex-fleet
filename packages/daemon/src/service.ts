@@ -34,7 +34,8 @@ export class FleetService {
 
   constructor(
     readonly paths: FleetPaths,
-    private readonly workerBackend: WorkerBackend = new FakeWorkerBackend()
+    private readonly workerBackend: WorkerBackend = new FakeWorkerBackend(),
+    private readonly staleAfterMs = 5 * 60 * 1000
   ) {
     this.eventLog = new EventLog(paths.eventsPath);
     const events = this.eventLog.readAll();
@@ -44,7 +45,8 @@ export class FleetService {
     this.nextSeq = events.reduce((max, event) => Math.max(max, event.seq), -1) + 1;
   }
 
-  handle(method: DaemonMethod, envelope: RpcEnvelope): unknown {
+  async handle(method: DaemonMethod, envelope: RpcEnvelope): Promise<unknown> {
+    this.refreshStaleTasks();
     const params = methodParamsSchemas[method].parse(envelope.params ?? {});
 
     switch (method) {
@@ -57,7 +59,7 @@ export class FleetService {
       case "list_targets":
         return { targets: this.listTargets() };
       case "delegate_task":
-        return this.delegateTask(envelope.clientId, delegateTaskRequestSchema.parse(params));
+        return await this.delegateTask(envelope.clientId, delegateTaskRequestSchema.parse(params));
       case "get_task":
         return {
           task: this.requireTask(envelope.clientId, getTaskRequestSchema.parse(params).taskId)
@@ -95,10 +97,10 @@ export class FleetService {
     return [shellTarget].concat(this.registry.listDescriptors());
   }
 
-  private delegateTask(
+  private async delegateTask(
     clientId: string,
     request: ReturnType<typeof delegateTaskRequestSchema.parse>
-  ): { taskId: string } {
+  ): Promise<{ taskId: string }> {
     const taskId = randomUUID();
     const createdAt = new Date().toISOString();
     const ownerSession = this.ownerFor(clientId);
@@ -139,7 +141,7 @@ export class FleetService {
       state: "running",
       lastActivityAt: createdAt
     } satisfies TaskStatePayload);
-    const result = this.workerBackend.run({ taskId, request, branch, worktreePath });
+    const result = await this.workerBackend.run({ taskId, request, branch, worktreePath });
     this.append("task_state", taskId, {
       state: "exited",
       exitCode: result.exitCode,
@@ -150,9 +152,17 @@ export class FleetService {
     return { taskId };
   }
 
-  private waitTasks(clientId: string, request: ReturnType<typeof waitTasksRequestSchema.parse>) {
+  private async waitTasks(
+    clientId: string,
+    request: ReturnType<typeof waitTasksRequestSchema.parse>
+  ) {
+    let events = this.state.eventsSince(request.sinceEventSeq, request.taskIds);
+    if (events.length === 0) {
+      await sleep(Math.min(request.maxWaitSeconds ?? 5, 45) * 1000);
+      this.refreshStaleTasks();
+      events = this.state.eventsSince(request.sinceEventSeq, request.taskIds);
+    }
     const snapshots = request.taskIds.map((taskId) => this.requireTask(clientId, taskId));
-    const events = this.state.eventsSince(request.sinceEventSeq, request.taskIds);
     return {
       snapshots,
       events,
@@ -192,8 +202,28 @@ export class FleetService {
     this.state.apply(event);
     return event;
   }
+
+  private refreshStaleTasks(): void {
+    const now = Date.now();
+    for (const task of this.state.listAllTasks()) {
+      if (task.state !== "running") {
+        continue;
+      }
+      const lastActivity = Date.parse(task.lastActivityAt ?? task.updatedAt);
+      if (Number.isFinite(lastActivity) && now - lastActivity > this.staleAfterMs) {
+        this.append("task_state", task.id, {
+          state: "stale",
+          lastActivityAt: task.lastActivityAt
+        } satisfies TaskStatePayload);
+      }
+    }
+  }
 }
 
 function preview(value: string, maxLength = 240): string {
   return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }

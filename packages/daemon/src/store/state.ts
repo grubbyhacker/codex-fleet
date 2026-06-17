@@ -95,6 +95,10 @@ export class FleetState {
     return [...this.tasks.values()].filter((task) => sameOwner(task.ownerSession, ownerSession));
   }
 
+  listAllTasks(): TaskSnapshot[] {
+    return [...this.tasks.values()];
+  }
+
   history(taskId: string, limit = 50): Event[] {
     return this.events.filter((event) => event.taskId === taskId).slice(-limit);
   }

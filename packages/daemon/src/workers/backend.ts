@@ -13,7 +13,7 @@ export type WorkerResult = {
 };
 
 export interface WorkerBackend {
-  run(input: WorkerInput): WorkerResult;
+  run(input: WorkerInput): Promise<WorkerResult> | WorkerResult;
 }
 
 export class FakeWorkerBackend implements WorkerBackend {
