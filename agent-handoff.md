@@ -98,3 +98,17 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Continue remaining v1 hardening around model-tier availability/fallback and any final design-plan gaps.
+
+## 2026-06-18 Model Tier Availability
+
+### Did
+
+- Added available-tier routing via `CODEX_FLEET_AVAILABLE_MODEL_TIERS`.
+- Kept safety upgrades for high-risk/full-delivery/push-to-main tasks and reject them if no strong tier is available.
+- Added explicit `model_routing` events for safety upgrades and unavailable-tier fallbacks.
+- Moved routing before worktree creation so rejected repo tasks do not leave orphan worktrees.
+- Verified focused model/worktree/RPC tests and aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Do a final v1 gap pass against `docs/DESIGN.md` and `docs/V1_IMPLEMENTATION_PLAN.md`.

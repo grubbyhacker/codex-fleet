@@ -11,6 +11,7 @@ import {
   waitTasksRequestSchema,
   type DaemonMethod,
   type Event,
+  type ModelTier,
   type OwnerSession,
   type RpcEnvelope,
   type TargetDescriptor
@@ -118,7 +119,8 @@ export class FleetService {
     const taskId = randomUUID();
     const createdAt = new Date().toISOString();
     const ownerSession = this.ownerFor(clientId);
-    const actualModel = routeModelTier(request);
+    let defaultModelTier: ModelTier = "standard";
+    let repoForWorktree: ReturnType<RepoRegistry["get"]>;
     let branch: string | undefined;
     let worktreePath: string | undefined;
 
@@ -131,12 +133,16 @@ export class FleetService {
           "list_targets"
         );
       }
+      defaultModelTier = repo.defaultModelTier;
+      repoForWorktree = repo;
+    }
 
-      if (request.deliveryMode !== "research_only") {
-        const resource = this.worktrees.create(repo, taskId);
-        branch = resource.branch;
-        worktreePath = resource.worktreePath;
-      }
+    const modelRouting = routeModelTier(request, defaultModelTier);
+
+    if (repoForWorktree && request.deliveryMode !== "research_only") {
+      const resource = this.worktrees.create(repoForWorktree, taskId);
+      branch = resource.branch;
+      worktreePath = resource.worktreePath;
     }
 
     this.append("task_created", taskId, {
@@ -145,11 +151,17 @@ export class FleetService {
       risk: request.risk,
       resumeTaskId: request.resumeTaskId,
       modelTier: request.modelTier,
-      actualModel,
+      actualModel: modelRouting.actualModel,
       promptPreview: preview(request.prompt),
       ownerSession,
       createdAt
     } satisfies TaskCreatedPayload);
+    if (
+      modelRouting.reason === "safety_upgrade" ||
+      modelRouting.reason === "requested_unavailable_fallback"
+    ) {
+      this.append("model_routing", taskId, modelRouting);
+    }
     if (branch || worktreePath) {
       this.append("task_resource", taskId, { branch, worktreePath });
     }
@@ -263,15 +275,91 @@ function preview(value: string, maxLength = 240): string {
   return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
 }
 
-function routeModelTier(request: ReturnType<typeof delegateTaskRequestSchema.parse>) {
-  if (
+function routeModelTier(
+  request: ReturnType<typeof delegateTaskRequestSchema.parse>,
+  defaultModelTier: ModelTier
+): {
+  requestedModel?: ModelTier;
+  defaultModelTier: ModelTier;
+  actualModel: ModelTier;
+  availableModelTiers: ModelTier[];
+  reason:
+    | "requested_available"
+    | "default_selected"
+    | "safety_upgrade"
+    | "requested_unavailable_fallback";
+} {
+  const availableModelTiers = availableModelTiersFromEnv();
+  const minimumTier =
     request.risk === "high" ||
     request.deliveryMode === "full_delivery" ||
     request.deliveryMode === "push_to_main"
-  ) {
-    return "strong";
+      ? "strong"
+      : "cheap";
+  const requestedModel = request.modelTier;
+  const preferredTier = requestedModel ?? defaultModelTier;
+  const requiredTier = strongerTier(preferredTier, minimumTier);
+  const actualModel = firstAvailableAtLeast(availableModelTiers, requiredTier);
+  if (!actualModel) {
+    throw new FleetError(
+      "conflict",
+      `No available model tier satisfies minimum "${requiredTier}"`,
+      "list_targets"
+    );
   }
-  return request.modelTier ?? "standard";
+
+  return {
+    requestedModel,
+    defaultModelTier,
+    actualModel,
+    availableModelTiers,
+    reason: modelRoutingReason(requestedModel, preferredTier, requiredTier, actualModel)
+  };
+}
+
+function modelRoutingReason(
+  requestedModel: ModelTier | undefined,
+  preferredTier: ModelTier,
+  requiredTier: ModelTier,
+  actualModel: ModelTier
+):
+  | "requested_available"
+  | "default_selected"
+  | "safety_upgrade"
+  | "requested_unavailable_fallback" {
+  if (!requestedModel) {
+    return actualModel === preferredTier ? "default_selected" : "requested_unavailable_fallback";
+  }
+  if (tierRank(requiredTier) > tierRank(preferredTier)) {
+    return "safety_upgrade";
+  }
+  return actualModel === requestedModel ? "requested_available" : "requested_unavailable_fallback";
+}
+
+function availableModelTiersFromEnv(): ModelTier[] {
+  const raw = process.env.CODEX_FLEET_AVAILABLE_MODEL_TIERS;
+  const parsed = raw
+    ?.split(",")
+    .map((tier) => tier.trim())
+    .filter((tier): tier is ModelTier => ["cheap", "standard", "strong"].includes(tier));
+  return parsed && parsed.length > 0 ? parsed : ["cheap", "standard", "strong"];
+}
+
+function firstAvailableAtLeast(
+  availableModelTiers: ModelTier[],
+  minimumTier: ModelTier
+): ModelTier | undefined {
+  return (["cheap", "standard", "strong"] as const)
+    .filter((tier) => tierRank(tier) >= tierRank(minimumTier))
+    .find((tier) => availableModelTiers.includes(tier));
+}
+
+function strongerTier(left: ModelTier, right: ModelTier): ModelTier {
+  return tierRank(left) >= tierRank(right) ? left : right;
+}
+
+function tierRank(tier: ModelTier): number {
+  return { cheap: 0, standard: 1, strong: 2 }[tier];
 }
 
 function hasFleetReadAccess(client?: ClientRecord): boolean {
