@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,12 +11,13 @@ import { callDaemon } from "../../packages/daemon/src/rpc/client.js";
 import { startDaemon } from "../../packages/daemon/src/rpc/server.js";
 
 describe("cli views", () => {
-  it("lists and reads tasks through daemon rpc", async () => {
+  it("lists and reads tasks across clients through daemon rpc", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-cli-"));
     const paths = resolveFleetPaths(root);
     const daemon = await startDaemon(paths);
-    const client = createClient(paths, "cli", "cli");
-    const rpc = { socketPath: paths.socketPath, clientId: "cli", token: client.token };
+    createClient(paths, "cli", "cli");
+    const orchestrator = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: orchestrator.token };
 
     try {
       const delegated = (await callDaemon(rpc, "delegate_task", {
@@ -32,6 +34,48 @@ describe("cli views", () => {
 
       const logs = await runCli(root, "logs", delegated.taskId);
       expect(logs).toContain("task_created");
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("lists and runs cleanup candidates", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-cli-cleanup-"));
+    const repo = join(root, "base-repo");
+    initRepo(repo);
+    const paths = resolveFleetPaths(join(root, "fleet"));
+    mkdirSync(paths.rootDir, { recursive: true });
+    writeFileSync(
+      paths.reposPath,
+      `${JSON.stringify({
+        repos: [{ alias: "fixture", baseCheckout: repo, defaultBranch: "main" }]
+      })}\n`
+    );
+    const daemon = await startDaemon(paths);
+    createClient(paths, "cli", "cli");
+    const orchestrator = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: orchestrator.token };
+
+    try {
+      const clean = await delegatePatch(rpc);
+      const cleanTask = await getTask(rpc, clean.taskId);
+      const dryRun = await runCli(paths.rootDir, "cleanup", "list", "--dry-run");
+      expect(dryRun).toContain(clean.taskId);
+      expect(dryRun).toContain("cleanup_ready");
+
+      await runCli(paths.rootDir, "cleanup", "run", "--task", clean.taskId);
+      expect(existsSync(cleanTask.worktreePath ?? "")).toBe(false);
+
+      const dirty = await delegatePatch(rpc);
+      const dirtyTask = await getTask(rpc, dirty.taskId);
+      writeFileSync(join(dirtyTask.worktreePath ?? "", "dirty.txt"), "dirty\n");
+      const dirtyDryRun = await runCli(paths.rootDir, "cleanup", "list", "--dry-run");
+      expect(dirtyDryRun).toContain(dirty.taskId);
+      expect(dirtyDryRun).toContain("cleanup_blocked_dirty");
+
+      await runCli(paths.rootDir, "cleanup", "run", "--task", dirty.taskId, "--force");
+      expect(existsSync(dirtyTask.worktreePath ?? "")).toBe(false);
     } finally {
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });
@@ -64,5 +108,42 @@ async function runCli(root: string, ...args: string[]): Promise<string> {
 function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   return Object.fromEntries(
     Object.entries(env).filter((entry): entry is [string, string] => Boolean(entry[1]))
+  );
+}
+
+async function delegatePatch(rpc: { socketPath: string; clientId: string; token: string }) {
+  return (await callDaemon(rpc, "delegate_task", {
+    target: { repo: "fixture" },
+    deliveryMode: "patch",
+    prompt: "patch"
+  })) as { taskId: string };
+}
+
+async function getTask(
+  rpc: { socketPath: string; clientId: string; token: string },
+  taskId: string
+) {
+  const result = (await callDaemon(rpc, "get_task", { taskId })) as {
+    task: { worktreePath?: string };
+  };
+  return result.task;
+}
+
+function initRepo(path: string): void {
+  execFileSync("git", ["init", "-b", "main", path], { stdio: "ignore" });
+  writeFileSync(join(path, "README.md"), "# fixture\n");
+  execFileSync("git", ["add", "README.md"], { cwd: path, stdio: "ignore" });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=Codex Fleet Test",
+      "-c",
+      "user.email=fleet@example.test",
+      "commit",
+      "-m",
+      "init"
+    ],
+    { cwd: path, stdio: "ignore" }
   );
 }

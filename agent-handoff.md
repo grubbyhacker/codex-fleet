@@ -58,3 +58,16 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Continue v1 gaps from the plan: richer operator cleanup CLI, TUI observability, and hardening/service install.
+
+## 2026-06-18 Operator Cleanup CLI
+
+### Did
+
+- Let `admin`-scoped CLI clients view, watch, inspect, and end tasks across orchestrator client ownership boundaries.
+- Added `codex-fleet cleanup list --dry-run` with worktree candidate classification.
+- Added `codex-fleet cleanup run --task <id>` plus explicit `--force` worktree removal for dirty operator cleanup.
+- Verified focused CLI/cleanup/RPC tests and aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Continue with v1 observability TUI and daemon hardening/service install items.

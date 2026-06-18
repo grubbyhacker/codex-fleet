@@ -19,6 +19,7 @@ import {
 import { CleanupManager } from "./cleanup/cleanup-manager.js";
 import type { FleetPaths } from "./paths.js";
 import { RepoRegistry } from "./registry/repo-registry.js";
+import type { ClientRecord } from "./rpc/auth.js";
 import { FleetError } from "./rpc/errors.js";
 import { EventLog } from "./store/event-log.js";
 import { FleetState, type TaskCreatedPayload, type TaskStatePayload } from "./store/state.js";
@@ -48,7 +49,11 @@ export class FleetService {
     this.nextSeq = events.reduce((max, event) => Math.max(max, event.seq), -1) + 1;
   }
 
-  async handle(method: DaemonMethod, envelope: RpcEnvelope): Promise<unknown> {
+  async handle(
+    method: DaemonMethod,
+    envelope: RpcEnvelope,
+    client?: ClientRecord
+  ): Promise<unknown> {
     this.refreshStaleTasks();
     const params = methodParamsSchemas[method].parse(envelope.params ?? {});
 
@@ -65,25 +70,29 @@ export class FleetService {
         return await this.delegateTask(envelope.clientId, delegateTaskRequestSchema.parse(params));
       case "get_task":
         return {
-          task: this.requireTask(envelope.clientId, getTaskRequestSchema.parse(params).taskId)
+          task: this.requireTask(
+            envelope.clientId,
+            getTaskRequestSchema.parse(params).taskId,
+            client
+          )
         };
       case "wait_tasks":
-        return this.waitTasks(envelope.clientId, waitTasksRequestSchema.parse(params));
+        return this.waitTasks(envelope.clientId, waitTasksRequestSchema.parse(params), client);
       case "list_tasks": {
         const request = listTasksRequestSchema.parse(params);
-        const tasks = this.state
-          .listTasks(this.ownerFor(envelope.clientId))
-          .filter((task) => !request.states || request.states.includes(task.state));
+        const tasks = this.visibleTasks(envelope.clientId, client).filter(
+          (task) => !request.states || request.states.includes(task.state)
+        );
         return { tasks };
       }
       case "get_task_history": {
         const request = getTaskHistoryRequestSchema.parse(params);
-        this.requireTask(envelope.clientId, request.taskId);
+        this.requireTask(envelope.clientId, request.taskId, client);
         return { events: this.state.history(request.taskId, request.limit) };
       }
       case "end_task": {
         const request = endTaskRequestSchema.parse(params);
-        const task = this.requireTask(envelope.clientId, request.taskId);
+        const task = this.requireTask(envelope.clientId, request.taskId, client);
         const repo = "repo" in task.target ? this.registry.get(task.target.repo) : undefined;
         const cleanup = this.cleanup.releaseWorktree(task, repo);
         return { accepted: true, taskId: request.taskId, cleanup };
@@ -174,7 +183,8 @@ export class FleetService {
 
   private async waitTasks(
     clientId: string,
-    request: ReturnType<typeof waitTasksRequestSchema.parse>
+    request: ReturnType<typeof waitTasksRequestSchema.parse>,
+    client?: ClientRecord
   ) {
     let events = this.state.eventsSince(request.sinceEventSeq, request.taskIds);
     if (events.length === 0) {
@@ -182,7 +192,7 @@ export class FleetService {
       this.refreshStaleTasks();
       events = this.state.eventsSince(request.sinceEventSeq, request.taskIds);
     }
-    const snapshots = request.taskIds.map((taskId) => this.requireTask(clientId, taskId));
+    const snapshots = request.taskIds.map((taskId) => this.requireTask(clientId, taskId, client));
     return {
       snapshots,
       events,
@@ -190,16 +200,25 @@ export class FleetService {
     };
   }
 
-  private requireTask(clientId: string, taskId: string) {
+  private requireTask(clientId: string, taskId: string, client?: ClientRecord) {
     const task = this.state.getTask(taskId);
     if (!task) {
       throw new FleetError("not_found", `Unknown task "${taskId}"`, "list_tasks");
+    }
+    if (client?.scopes.includes("admin")) {
+      return task;
     }
     const ownerSession = this.ownerFor(clientId);
     if (task.ownerSession.clientId !== ownerSession.clientId) {
       throw new FleetError("not_found", `Unknown task "${taskId}"`, "list_tasks");
     }
     return task;
+  }
+
+  private visibleTasks(clientId: string, client?: ClientRecord) {
+    return client?.scopes.includes("admin")
+      ? this.state.listAllTasks()
+      : this.state.listTasks(this.ownerFor(clientId));
   }
 
   private ownerFor(

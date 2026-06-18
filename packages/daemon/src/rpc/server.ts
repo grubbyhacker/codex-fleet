@@ -72,7 +72,7 @@ async function handleLine(
     method = envelope.method;
     const client = authenticate(paths, envelope.clientId, envelope.token);
     const authorizedMethod = authorize(client, envelope.method);
-    const result = await service.handle(authorizedMethod, envelope);
+    const result = await service.handle(authorizedMethod, envelope, client);
     appendAuditRecord(paths.auditPath, {
       requestId,
       clientId,
