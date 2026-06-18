@@ -92,6 +92,8 @@ describe("cli views", () => {
       expect(plist).toContain("<string>run</string>");
       expect(plist).not.toContain("<string>bun</string>");
       expect(plist).not.toContain("packages/cli/src/index.ts");
+      expect(plist).toContain("<key>PATH</key>");
+      expect(plist).toContain("/opt/homebrew/bin");
       expect(plist).toContain("CODEX_FLEET_STATE_DIR");
       expect(plist).toContain("CODEX_FLEET_WORKER_BACKEND");
       expect(plist).toContain("CODEX_FLEET_CODEX_COMMAND");

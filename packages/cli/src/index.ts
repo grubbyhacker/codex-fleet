@@ -330,16 +330,29 @@ function launchAgentDaemonPath(): string {
 
 function launchAgentEnvironment(): Array<[string, string]> {
   const defaults = new Map<string, string>([
+    [
+      "PATH",
+      [
+        join(homedir(), ".local", "bin"),
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin"
+      ].join(":")
+    ],
     ["CODEX_FLEET_WORKER_BACKEND", "codex"],
     ["CODEX_FLEET_CODEX_COMMAND", "/Applications/Codex.app/Contents/Resources/codex"],
     ["CODEX_FLEET_CODEX_MODEL", "gpt-5.3-codex-spark"]
   ]);
   for (const [key, value] of Object.entries(process.env)) {
-    if (value) {
+    if (value && key !== "PATH") {
       defaults.set(key, value);
     }
   }
   return [
+    "PATH",
     "CODEX_FLEET_STATE_DIR",
     "CODEX_FLEET_WORKER_BACKEND",
     "CODEX_FLEET_CODEX_MODEL",
