@@ -10,6 +10,16 @@ type CodexToolResult = {
   content?: string;
 };
 
+type CodexBackendError = {
+  type?: string;
+  error?: {
+    type?: string;
+    message?: string;
+    param?: string;
+  };
+  status?: number;
+};
+
 export class CodexWorkerBackend implements WorkerBackend {
   async run(input: WorkerInput): Promise<WorkerResult> {
     const cwd = input.worktreePath ?? input.repoBaseCheckout ?? process.cwd();
@@ -39,18 +49,22 @@ export class CodexWorkerBackend implements WorkerBackend {
         undefined,
         { timeout: Number(process.env.CODEX_FLEET_CODEX_TIMEOUT_MS ?? "600000") }
       );
-      const parsed = parseCodexResult(result);
-      const finalResponse = parsed.content ?? "";
-      return {
-        exitCode: 0,
-        finalResponse,
-        finalResponsePreview: preview(finalResponse),
-        codexThreadId: parsed.threadId
-      };
+      return codexWorkerResultFromToolResult(result);
     } finally {
       await client.close().catch(() => undefined);
     }
   }
+}
+
+export function codexWorkerResultFromToolResult(result: unknown): WorkerResult {
+  const parsed = parseCodexResult(result);
+  const finalResponse = parsed.content ?? "";
+  return {
+    exitCode: isCodexBackendError(finalResponse) ? 1 : 0,
+    finalResponse,
+    finalResponsePreview: preview(finalResponse),
+    codexThreadId: parsed.threadId
+  };
 }
 
 export function resolveCodexCommand(candidates = defaultCodexCommandCandidates()): string {
@@ -155,6 +169,26 @@ function parseCodexResult(result: unknown): CodexToolResult {
   }
 
   return { content: text };
+}
+
+function isCodexBackendError(content: string): boolean {
+  if (!content.trim()) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(content) as CodexBackendError;
+    return (
+      parsed?.type === "error" &&
+      typeof parsed.error === "object" &&
+      typeof parsed.error?.message === "string" &&
+      typeof parsed.status === "number" &&
+      Number.isInteger(parsed.status) &&
+      parsed.status >= 400
+    );
+  } catch {
+    return false;
+  }
 }
 
 function stripUndefined<T extends Record<string, unknown>>(value: T): T {

@@ -236,3 +236,16 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 - Updated post-run worktree status inspection to compare against the freshly fetched remote default branch instead of stale local `main`.
 - Added regression coverage for a stale local main with an advanced remote default branch.
 - Rebuilt/installed standalone binaries, restarted the LaunchAgent daemon, and verified aggregate `mise exec -- bun run check`.
+
+## 2026-06-18 Codex Backend Error Classification
+
+### Did
+
+- Investigated Cowork task `50d15418-8bbf-4e3c-92ac-1018ea0d88e1`; it exited with code 0 while its final response was a Codex backend API error: `invalid_request_error`, status 400, unsupported `image_generation` tool.
+- Fixed the Codex worker backend to classify JSON `{ "type": "error", "status": 4xx/5xx }` tool payloads as nonzero worker exits while preserving the full final response.
+- Added regression coverage for unsupported-tool backend error payloads.
+- Rebuilt/installed standalone binaries, restarted the LaunchAgent daemon, and verified aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Historical event-log records are append-only; the already-finished task above still shows its original exit code 0, but new matching failures will be nonzero and visible as attention items.

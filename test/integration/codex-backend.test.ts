@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  codexWorkerResultFromToolResult,
   codexWorkerToolArguments,
   resolveCodexCommand
 } from "../../packages/daemon/src/workers/codex-backend.js";
@@ -86,6 +87,36 @@ describe("codex worker backend", () => {
     expect(args["developer-instructions"]).toContain(
       "Do not leave intended review changes only as untracked or uncommitted files"
     );
+  });
+
+  it("marks codex backend error payloads as failed worker results", () => {
+    const content = JSON.stringify(
+      {
+        type: "error",
+        error: {
+          type: "invalid_request_error",
+          message: "Tool 'image_generation' is not supported with this model.",
+          param: "tools"
+        },
+        status: 400
+      },
+      null,
+      2
+    );
+
+    const result = codexWorkerResultFromToolResult({
+      structuredContent: {
+        threadId: "thread-1",
+        content
+      }
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 1,
+      codexThreadId: "thread-1",
+      finalResponse: content,
+      finalResponsePreview: content
+    });
   });
 });
 
