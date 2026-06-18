@@ -13,6 +13,13 @@ type DashboardOptions = {
   taskId?: string;
   showAll?: boolean;
   color?: boolean;
+  width?: number;
+  height?: number;
+};
+
+type DashboardView = {
+  leftLines: string[];
+  rightLines: string[];
 };
 
 const terminalStates = new Set<TaskState>(["exited", "failed_to_start", "cancelled", "timed_out"]);
@@ -20,22 +27,33 @@ const liveStates = new Set<TaskState>(["queued", "running"]);
 const freshTerminalWindowMs = 30 * 60 * 1_000;
 const freshStaleWindowMs = 10 * 60 * 1_000;
 const maxDefaultTerminalRows = 8;
+const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
 export function tuiProbe(): { ok: true; dashboard: "opentui" } {
   return { ok: true, dashboard: "opentui" };
 }
 
 export function renderDashboard(data: DashboardData, options: DashboardOptions = {}): string {
-  const lines: string[] = [];
+  const view = buildDashboardView(data, options);
+  const width = options.width ?? 120;
+  if (width >= 112) {
+    return renderSplitDashboard(view, width, options);
+  }
+  return `${[...view.leftLines, "", ...view.rightLines].join("\n")}\n`;
+}
+
+function buildDashboardView(data: DashboardData, options: DashboardOptions): DashboardView {
+  const leftLines: string[] = [];
+  const rightLines: string[] = [];
   const now = Date.parse(data.collectedAt);
   const visible = selectVisibleTasks(data.tasks, now, options);
   const selected = selectTask(data.tasks, visible.tasks, options.taskId);
   const summary = summarize(data.tasks);
   const liveCount = summary.queued + summary.running;
 
-  lines.push(style("Codex Fleet", "title", options));
-  lines.push(`Updated: ${data.collectedAt} (${formatAge(now, now)})`);
-  lines.push(
+  leftLines.push(style("Codex Fleet", "title", options));
+  leftLines.push(`Updated: ${data.collectedAt} (${formatAge(now, now)})`);
+  leftLines.push(
     [
       liveCount > 0
         ? style(`LIVE ${liveCount}`, "active", options)
@@ -52,7 +70,7 @@ export function renderDashboard(data: DashboardData, options: DashboardOptions =
       `cleanup-pending ${summary.cleanupPending}`
     ].join(" | ")
   );
-  lines.push(
+  leftLines.push(
     [
       `tasks ${data.tasks.length}`,
       `visible ${visible.tasks.length}`,
@@ -66,48 +84,50 @@ export function renderDashboard(data: DashboardData, options: DashboardOptions =
       .filter((part): part is string => Boolean(part))
       .join(" | ")
   );
-  lines.push("");
+  leftLines.push("");
 
   if (visible.live.length > 0) {
-    lines.push(style("Live", "section", options));
+    leftLines.push(style("Live", "section", options));
     for (const task of visible.live) {
-      lines.push(formatTaskRow(task, now, options));
+      leftLines.push(formatTaskRow(task, now, options));
     }
   } else {
-    lines.push(`${style("Live", "section", options)}  ${style("none", "dim", options)}`);
+    leftLines.push(`${style("Live", "section", options)}  ${style("none", "dim", options)}`);
   }
 
   if (visible.needsAttention.length > 0) {
-    lines.push("");
-    lines.push(style("Action Queue", "warn", options));
+    leftLines.push("");
+    leftLines.push(style("Action Queue", "warn", options));
     for (const task of visible.needsAttention) {
-      lines.push(formatTaskRow(task, now, options));
+      leftLines.push(formatTaskRow(task, now, options));
       for (const action of attentionActions(task)) {
-        lines.push(`    ${style(action, "dim", options)}`);
+        leftLines.push(`    ${style(action, "dim", options)}`);
       }
     }
   }
 
   if (visible.stale.length > 0) {
-    lines.push("");
-    lines.push(style("Stale", "warn", options));
+    leftLines.push("");
+    leftLines.push(style("Stale", "warn", options));
     for (const task of visible.stale) {
-      lines.push(formatTaskRow(task, now, options));
+      leftLines.push(formatTaskRow(task, now, options));
     }
   }
 
   if (visible.terminal.length > 0) {
-    lines.push("");
-    lines.push(style(options.showAll ? "Terminal History" : "Recent Results", "section", options));
+    leftLines.push("");
+    leftLines.push(
+      style(options.showAll ? "Terminal History" : "Recent Results", "section", options)
+    );
     for (const task of visible.terminal) {
-      lines.push(formatTaskRow(task, now, options));
+      leftLines.push(formatTaskRow(task, now, options));
     }
   }
 
   if (visible.hiddenTerminal + visible.hiddenStale > 0) {
-    lines.push("");
+    leftLines.push("");
     const hidden = visible.hiddenTerminal + visible.hiddenStale;
-    lines.push(
+    leftLines.push(
       style(
         `${hidden} older task${hidden === 1 ? "" : "s"} hidden; use --all to show them.`,
         "dim",
@@ -117,44 +137,68 @@ export function renderDashboard(data: DashboardData, options: DashboardOptions =
   }
 
   if (selected) {
-    lines.push("");
-    lines.push(`Task ${selected.id}`);
-    lines.push(`  Target:   ${formatTarget(selected)}`);
-    lines.push(`  Session:  ${formatSession(selected)}`);
-    lines.push(`  State:    ${stateBadge(selected, options)}`);
-    lines.push(
-      `  Started:  ${selected.createdAt} (${formatAge(Date.parse(selected.createdAt), now)} ago)`
+    rightLines.push(style("Selected Task", "section", options));
+    rightLines.push(`Task ${selected.id}`);
+    rightLines.push(`Target:   ${formatTarget(selected)}`);
+    rightLines.push(`Session:  ${formatSession(selected)}`);
+    rightLines.push(`State:    ${stateBadge(selected, options)}`);
+    rightLines.push(
+      `Started:  ${selected.createdAt} (${formatAge(Date.parse(selected.createdAt), now)} ago)`
     );
-    lines.push(
-      `  Updated:  ${selected.updatedAt} (${formatAge(Date.parse(selected.updatedAt), now)} ago)`
+    rightLines.push(
+      `Updated:  ${selected.updatedAt} (${formatAge(Date.parse(selected.updatedAt), now)} ago)`
     );
     if (liveStates.has(selected.state) || selected.state === "stale") {
-      lines.push(`  Quiet:    ${formatQuiet(selected, now)}`);
+      rightLines.push(`Activity: quiet ${formatQuiet(selected, now)}`);
+    }
+    if (terminalStates.has(selected.state)) {
+      const status = formatTerminalStatus(selected);
+      if (status) {
+        rightLines.push(`Status:   ${status}`);
+      }
     }
     if (selected.worktreePath) {
-      lines.push(`  Worktree: ${selected.worktreePath}`);
+      rightLines.push(`Worktree: ${selected.worktreePath}`);
     }
     if (selected.branch) {
-      lines.push(`  Branch:   ${selected.branch}`);
+      rightLines.push(`Branch:   ${selected.branch}`);
     }
     if (selected.exitCode !== undefined) {
-      lines.push(`  Exit:     ${selected.exitCode}`);
+      rightLines.push(`Exit:     ${selected.exitCode}`);
     }
-    if (selected.finalResponsePreview) {
-      lines.push(`  Last output: ${oneLine(selected.finalResponsePreview, 100)}`);
+    if (selected.finalResponse || selected.finalResponsePreview) {
+      rightLines.push("");
+      rightLines.push(style("Final Response", "section", options));
+      rightLines.push(
+        ...previewBlock(selected.finalResponse ?? selected.finalResponsePreview ?? "", 10)
+      );
+    } else if (liveStates.has(selected.state)) {
+      rightLines.push("");
+      rightLines.push(style("Activity", "section", options));
+      rightLines.push(style("No final response yet.", "dim", options));
+    }
+    if (selected.workerStderr || selected.workerStderrPreview) {
+      rightLines.push("");
+      rightLines.push(style("Worker Stderr", "warn", options));
+      rightLines.push(
+        ...previewBlock(selected.workerStderr ?? selected.workerStderrPreview ?? "", 6)
+      );
     }
 
     const history = data.histories[selected.id] ?? [];
     if (history.length > 0) {
-      lines.push("");
-      lines.push("Events");
-      for (const event of history.slice(-8)) {
-        lines.push(`  ${event.seq} ${event.type} ${oneLine(event.summary, 120)}`);
+      rightLines.push("");
+      rightLines.push(style("Events", "section", options));
+      for (const event of history.slice(-12)) {
+        rightLines.push(formatEventRow(event, options));
       }
     }
+  } else {
+    rightLines.push(style("Selected Task", "section", options));
+    rightLines.push(style("No visible task selected.", "dim", options));
   }
 
-  return `${lines.join("\n")}\n`;
+  return { leftLines, rightLines };
 }
 
 if (import.meta.main) {
@@ -191,7 +235,7 @@ async function runDashboard(): Promise<void> {
 
   const refresh = async () => {
     try {
-      const options = { ...parseOptions(), color: false };
+      const options = parseOptions();
       text.content = renderDashboard(await loadDashboardData(options), options);
     } catch (error) {
       text.content = `Codex Fleet\n${error instanceof Error ? error.message : String(error)}\n`;
@@ -241,8 +285,76 @@ function parseOptions(): DashboardOptions {
     color:
       !process.argv.includes("--json") &&
       !process.argv.includes("--no-color") &&
-      process.env.NO_COLOR === undefined
+      process.env.NO_COLOR === undefined,
+    width: process.stdout.columns ?? parseTerminalDimension(process.env.COLUMNS),
+    height: process.stdout.rows ?? parseTerminalDimension(process.env.LINES)
   };
+}
+
+function parseTerminalDimension(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function renderSplitDashboard(
+  view: DashboardView,
+  width: number,
+  options: DashboardOptions
+): string {
+  const gap = 1;
+  const leftWidth = Math.max(58, Math.floor(width * 0.58));
+  const rightWidth = width - leftWidth - gap;
+  if (rightWidth < 42) {
+    return `${[...view.leftLines, "", ...view.rightLines].join("\n")}\n`;
+  }
+
+  const maxInnerLines = options.height ? Math.max(4, options.height - 2) : undefined;
+  const leftBox = renderBox("Fleet", view.leftLines, leftWidth, options, maxInnerLines);
+  const rightBox = renderBox("Activity", view.rightLines, rightWidth, options, maxInnerLines);
+  const rows = Math.max(leftBox.length, rightBox.length);
+  const lines: string[] = [];
+  for (let index = 0; index < rows; index += 1) {
+    const left = padVisible(leftBox[index] ?? "", leftWidth);
+    const right = padVisible(rightBox[index] ?? "", rightWidth);
+    lines.push(`${left} ${right}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function renderBox(
+  title: string,
+  lines: string[],
+  width: number,
+  options: DashboardOptions,
+  maxInnerLines?: number
+): string[] {
+  const visibleTitle = ` ${title} `;
+  const top = `+${visibleTitle}${"-".repeat(Math.max(0, width - visibleTitle.length - 2))}+`;
+  const bottom = `+${"-".repeat(Math.max(0, width - 2))}+`;
+  const innerWidth = Math.max(1, width - 4);
+  const innerLines = maxInnerLines ? clampLines(lines, maxInnerLines, options) : lines;
+  return [
+    style(top, "border", options),
+    ...innerLines.map(
+      (line) =>
+        `${style("|", "border", options)} ${fitLine(line, innerWidth)} ${style("|", "border", options)}`
+    ),
+    style(bottom, "border", options)
+  ];
+}
+
+function clampLines(lines: string[], maxLines: number, options: DashboardOptions): string[] {
+  if (lines.length <= maxLines) {
+    return lines;
+  }
+  const visibleLines = Math.max(1, maxLines - 1);
+  return [
+    ...lines.slice(0, visibleLines),
+    style(`... ${lines.length - visibleLines} more lines`, "dim", options)
+  ];
 }
 
 function summarize(tasks: TaskSnapshot[]) {
@@ -354,6 +466,65 @@ function formatTaskRow(task: TaskSnapshot, now: number, options: DashboardOption
   return [prefix, task.id.slice(0, 8), state, target, formatSession(task), age, quiet]
     .filter(Boolean)
     .join("  ");
+}
+
+function formatEventRow(event: Event, options: DashboardOptions): string {
+  return [
+    String(event.seq).padStart(4),
+    style(event.type.padEnd(14), eventStyle(event), options),
+    oneLine(event.summary, 110)
+  ].join(" ");
+}
+
+function eventStyle(
+  event: Event
+): "active" | "bad" | "dim" | "info" | "ok" | "section" | "title" | "warn" {
+  if (event.type === "task_activity") {
+    return "active";
+  }
+  if (event.type === "task_state" && /failed|timed_out|cancelled/i.test(event.summary)) {
+    return "bad";
+  }
+  if (event.type === "task_state" && /stale/i.test(event.summary)) {
+    return "warn";
+  }
+  if (event.type === "task_state" && /exited/i.test(event.summary)) {
+    return "ok";
+  }
+  if (event.type === "worktree_status") {
+    return "warn";
+  }
+  return "info";
+}
+
+function previewBlock(value: string, maxLines: number): string[] {
+  const lines = wrapText(value.trim(), 100);
+  if (lines.length === 0) {
+    return ["(empty)"];
+  }
+  if (lines.length <= maxLines) {
+    return lines;
+  }
+  return [...lines.slice(0, maxLines), `... ${lines.length - maxLines} more lines`];
+}
+
+function wrapText(value: string, width: number): string[] {
+  const lines: string[] = [];
+  for (const rawLine of value.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n")) {
+    let remaining = rawLine.trimEnd();
+    if (remaining.length === 0) {
+      lines.push("");
+      continue;
+    }
+    while (remaining.length > width) {
+      const splitAt = remaining.lastIndexOf(" ", width);
+      const index = splitAt > 20 ? splitAt : width;
+      lines.push(remaining.slice(0, index));
+      remaining = remaining.slice(index).trimStart();
+    }
+    lines.push(remaining);
+  }
+  return lines;
 }
 
 function stateBadge(task: TaskSnapshot, options: DashboardOptions): string {
@@ -471,13 +642,38 @@ function oneLine(value: string, maxLength: number): string {
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
 }
 
+function fitLine(value: string, width: number): string {
+  const line = value.replaceAll("\t", "  ");
+  if (visibleLength(line) <= width) {
+    return padVisible(line, width);
+  }
+  const plain = stripAnsi(line);
+  if (width <= 3) {
+    return plain.slice(0, width);
+  }
+  return `${plain.slice(0, width - 3)}...`;
+}
+
+function padVisible(value: string, width: number): string {
+  const padding = width - visibleLength(value);
+  return padding > 0 ? `${value}${" ".repeat(padding)}` : value;
+}
+
+function visibleLength(value: string): number {
+  return stripAnsi(value).length;
+}
+
+function stripAnsi(value: string): string {
+  return value.replaceAll(ansiEscapePattern, "");
+}
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function style(
   value: string,
-  kind: "active" | "bad" | "dim" | "info" | "ok" | "section" | "title" | "warn",
+  kind: "active" | "bad" | "border" | "dim" | "info" | "ok" | "section" | "title" | "warn",
   options: DashboardOptions
 ): string {
   if (!options.color) {
@@ -486,6 +682,7 @@ function style(
   const codes = {
     active: "1;32",
     bad: "1;31",
+    border: "2;37",
     dim: "2",
     info: "1;36",
     ok: "32",

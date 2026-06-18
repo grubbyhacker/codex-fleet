@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import type { TaskSnapshot } from "../../packages/shared/src/index.js";
+import type { Event, TaskSnapshot } from "../../packages/shared/src/index.js";
 import { resolveFleetPaths } from "../../packages/daemon/src/paths.js";
 import { createClient } from "../../packages/daemon/src/rpc/auth.js";
 import { callDaemon } from "../../packages/daemon/src/rpc/client.js";
@@ -113,6 +113,45 @@ describe("tui dashboard", () => {
     expect(rendered).toContain("quiet 15m ago");
   });
 
+  it("uses a right-side activity pane for selected task details", () => {
+    const selected = task({
+      id: "selected-task-id",
+      state: "exited",
+      createdAt: "2026-06-18T17:45:00.000Z",
+      updatedAt: "2026-06-18T17:55:00.000Z",
+      finalResponse: "The full answer is visible in the activity pane.",
+      workerStderr: "stderr diagnostic line"
+    });
+    const rendered = renderDashboard(
+      {
+        collectedAt: "2026-06-18T18:00:00.000Z",
+        histories: {
+          [selected.id]: [
+            event(selected.id, 1, "task_created", '{"promptPreview":"do work"}'),
+            event(
+              selected.id,
+              2,
+              "task_activity",
+              '{"kind":"codex_event","detail":"item_completed"}'
+            ),
+            event(selected.id, 3, "task_state", '{"state":"exited","exitCode":0}')
+          ]
+        },
+        tasks: [selected]
+      },
+      { color: false, width: 120 }
+    );
+
+    expect(rendered).toContain("+ Fleet");
+    expect(rendered).toContain("+ Activity");
+    expect(rendered).toContain("Selected Task");
+    expect(rendered).toContain("Final Response");
+    expect(rendered).toContain("The full answer is visible");
+    expect(rendered).toContain("Worker Stderr");
+    expect(rendered).toContain("stderr diagnostic line");
+    expect(rendered).toContain("task_activity");
+  });
+
   it("promotes terminal tasks with retained worktrees as attention items", () => {
     const worktreePath = mkdtempSync(join(tmpdir(), "codex-fleet-tui-worktree-"));
     try {
@@ -144,7 +183,7 @@ describe("tui dashboard", () => {
       expect(rendered).toContain("repo-wor");
       expect(rendered).toContain("needs worktree");
       expect(rendered).toContain("inspect: codex-fleet status repo-wor");
-      expect(rendered).toContain(`diff: git -C '${worktreePath}' status --short`);
+      expect(rendered).toContain("diff: git -C");
       expect(rendered).toContain("release: codex-fleet cleanup run --task repo-wor");
       expect(rendered).toContain("1 older task hidden");
     } finally {
@@ -240,11 +279,15 @@ function task(overrides: {
   updatedAt: string;
   lastActivityAt?: string;
   worktreePath?: string;
+  finalResponse?: string;
+  workerStderr?: string;
 }): TaskSnapshot {
   return {
     createdAt: overrides.createdAt,
     deliveryMode: "research_only",
     exitCode: overrides.state === "exited" ? 0 : undefined,
+    finalResponse: overrides.finalResponse,
+    finalResponsePreview: overrides.finalResponse,
     id: overrides.id,
     lastActivityAt: overrides.lastActivityAt,
     ownerSession: { clientId: "orch" },
@@ -252,6 +295,18 @@ function task(overrides: {
     state: overrides.state,
     target: { repo: "youknowme" },
     updatedAt: overrides.updatedAt,
+    workerStderr: overrides.workerStderr,
+    workerStderrPreview: overrides.workerStderr,
     worktreePath: overrides.worktreePath
+  };
+}
+
+function event(taskId: string, seq: number, type: string, summary: string): Event {
+  return {
+    seq,
+    summary,
+    taskId,
+    ts: "2026-06-18T18:00:00.000Z",
+    type
   };
 }

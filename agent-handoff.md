@@ -309,3 +309,18 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Persist sanitized Codex activity events for a real per-agent transcript pane.
+
+## 2026-06-18 TUI Activity Pane
+
+### Did
+
+- Added a wide-screen split layout with boxed `Fleet` and `Activity` panes.
+- Moved selected-task details, explicit activity/terminal status, final response text, worker stderr, and recent daemon events into the right-side activity pane.
+- Kept a stacked fallback for narrow terminals and `--no-color`/`NO_COLOR` support for scripts.
+- Added terminal `COLUMNS`/`LINES` fallbacks for non-interactive smoke output.
+- Added regression coverage for the right-side pane and selected-task activity details.
+- Rebuilt/installed standalone binaries and verified aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Persist sanitized Codex event payloads if the pane should become a true Codex-console-style transcript rather than a durable daemon event/detail view.
