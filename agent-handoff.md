@@ -152,6 +152,17 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 
 - Final status pass and close v1 if no remaining plan/design gaps require implementation.
 
+## 2026-06-18 Productionization Plan
+
+### Did
+
+- Captured the production binary/service/MCP migration plan in `docs/PRODUCTIONIZATION_PLAN.md`.
+- Plan covers named binaries, LaunchAgent away from Bun, Codex and Claude/Cowork MCP migration, real `agent-infra` repo registry, and smoke/real-use readiness checks.
+
+### Next
+
+- Implement `docs/PRODUCTIONIZATION_PLAN.md` without editing `docs/DESIGN.md` unless a true design change is discovered.
+
 ## 2026-06-18 Cleanup Branch Retention
 
 ### Did
