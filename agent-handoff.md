@@ -71,3 +71,17 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Continue with v1 observability TUI and daemon hardening/service install items.
+
+## 2026-06-18 OpenTUI Dashboard
+
+### Did
+
+- Added OpenTUI to `packages/tui` and replaced the probe stub with a daemon-backed read-only dashboard.
+- Dashboard renders summary counts, usage counters, session groups, task detail, and recent event history.
+- Added `codex-fleet-tui --once` and `--once --json` for deterministic render checks.
+- Let read-only dashboard clients see fleet-wide task state without gaining mutation scopes.
+- Verified focused TUI tests and aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Continue with daemon startup hardening, LaunchAgent install support, and remaining model-routing hardening.

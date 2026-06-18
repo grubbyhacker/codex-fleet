@@ -205,7 +205,7 @@ export class FleetService {
     if (!task) {
       throw new FleetError("not_found", `Unknown task "${taskId}"`, "list_tasks");
     }
-    if (client?.scopes.includes("admin")) {
+    if (hasFleetReadAccess(client)) {
       return task;
     }
     const ownerSession = this.ownerFor(clientId);
@@ -216,7 +216,7 @@ export class FleetService {
   }
 
   private visibleTasks(clientId: string, client?: ClientRecord) {
-    return client?.scopes.includes("admin")
+    return hasFleetReadAccess(client)
       ? this.state.listAllTasks()
       : this.state.listTasks(this.ownerFor(clientId));
   }
@@ -272,6 +272,10 @@ function routeModelTier(request: ReturnType<typeof delegateTaskRequestSchema.par
     return "strong";
   }
   return request.modelTier ?? "standard";
+}
+
+function hasFleetReadAccess(client?: ClientRecord): boolean {
+  return client?.role === "cli" || client?.role === "dashboard";
 }
 
 async function sleep(ms: number): Promise<void> {

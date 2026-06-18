@@ -7,6 +7,8 @@
     "codex-fleet-tui": "./src/index.ts"
   },
   "dependencies": {
-    "@codex-fleet/shared": "workspace:*"
+    "@codex-fleet/daemon": "workspace:*",
+    "@codex-fleet/shared": "workspace:*",
+    "@opentui/core": "0.4.1"
   }
 }
