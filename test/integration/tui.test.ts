@@ -107,6 +107,9 @@ describe("tui dashboard", () => {
     expect(rendered).toContain("Needs Attention");
     expect(rendered).toContain("repo-wor");
     expect(rendered).toContain("needs worktree");
+    expect(rendered).toContain("inspect: codex-fleet status repo-wor");
+    expect(rendered).toContain("diff: git -C '/tmp/fleet/worktree' status --short");
+    expect(rendered).toContain("release: codex-fleet cleanup run --task repo-wor");
     expect(rendered).toContain("1 older terminal task hidden");
   });
 });

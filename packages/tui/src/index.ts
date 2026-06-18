@@ -78,6 +78,9 @@ export function renderDashboard(data: DashboardData, options: DashboardOptions =
     lines.push(style("Needs Attention", "warn", options));
     for (const task of visible.needsAttention) {
       lines.push(formatTaskRow(task, now, options));
+      for (const action of attentionActions(task)) {
+        lines.push(`    ${style(action, "dim", options)}`);
+      }
     }
   }
 
@@ -360,6 +363,20 @@ function formatTerminalStatus(task: TaskSnapshot): string {
   return "";
 }
 
+function attentionActions(task: TaskSnapshot): string[] {
+  const id = task.id.slice(0, 8);
+  const actions = [`inspect: codex-fleet status ${id}`, `events: codex-fleet logs ${id}`];
+  if (task.worktreePath) {
+    actions.push(`diff: git -C ${shellQuote(task.worktreePath)} status --short`);
+    actions.push(`release: codex-fleet cleanup run --task ${id}`);
+    actions.push(`force if disposable: codex-fleet cleanup run --task ${id} --force`);
+  }
+  if (task.state !== "exited" || (task.exitCode ?? 0) !== 0) {
+    actions.push("rerun as a new task if the failure is still relevant");
+  }
+  return actions;
+}
+
 function needsAttention(task: TaskSnapshot): boolean {
   if (!terminalStates.has(task.state)) {
     return false;
@@ -413,6 +430,10 @@ function formatAge(timestamp: number, now: number): string {
 function oneLine(value: string, maxLength: number): string {
   const normalized = value.replaceAll(/\s+/g, " ").trim();
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function style(
