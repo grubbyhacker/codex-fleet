@@ -78,6 +78,37 @@ describe("tui dashboard", () => {
     expect(rendered).not.toContain("old-terminal-task");
     expect(rendered.indexOf("active-t")).toBeLessThan(rendered.indexOf("fresh-te"));
   });
+
+  it("promotes terminal tasks with retained worktrees as attention items", () => {
+    const rendered = renderDashboard(
+      {
+        collectedAt: "2026-06-18T18:00:00.000Z",
+        histories: {},
+        tasks: [
+          task({
+            id: "repo-worktree-task",
+            state: "exited",
+            createdAt: "2026-06-18T17:55:00.000Z",
+            updatedAt: "2026-06-18T17:56:00.000Z",
+            worktreePath: "/tmp/fleet/worktree"
+          }),
+          task({
+            id: "old-terminal-task",
+            state: "exited",
+            createdAt: "2026-06-18T10:00:00.000Z",
+            updatedAt: "2026-06-18T10:01:00.000Z"
+          })
+        ]
+      },
+      { color: false }
+    );
+
+    expect(rendered).toContain("attention 1");
+    expect(rendered).toContain("Needs Attention");
+    expect(rendered).toContain("repo-wor");
+    expect(rendered).toContain("needs worktree");
+    expect(rendered).toContain("1 older terminal task hidden");
+  });
 });
 
 async function runTui(
@@ -120,6 +151,7 @@ function task(overrides: {
   createdAt: string;
   updatedAt: string;
   lastActivityAt?: string;
+  worktreePath?: string;
 }): TaskSnapshot {
   return {
     createdAt: overrides.createdAt,
@@ -131,6 +163,7 @@ function task(overrides: {
     risk: "low",
     state: overrides.state,
     target: { repo: "youknowme" },
-    updatedAt: overrides.updatedAt
+    updatedAt: overrides.updatedAt,
+    worktreePath: overrides.worktreePath
   };
 }

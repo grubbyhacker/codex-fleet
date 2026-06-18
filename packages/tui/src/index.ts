@@ -38,6 +38,9 @@ export function renderDashboard(data: DashboardData, options: DashboardOptions =
       activeCount > 0
         ? style(`ACTIVE ${activeCount}`, summary.stale > 0 ? "warn" : "active", options)
         : style("ACTIVE 0", "dim", options),
+      summary.needsAttention > 0
+        ? style(`attention ${summary.needsAttention}`, "warn", options)
+        : `attention ${summary.needsAttention}`,
       `queued ${summary.queued}`,
       `running ${summary.running}`,
       summary.stale > 0
@@ -68,6 +71,14 @@ export function renderDashboard(data: DashboardData, options: DashboardOptions =
     }
   } else {
     lines.push(`${style("Active", "section", options)}  ${style("none", "dim", options)}`);
+  }
+
+  if (visible.needsAttention.length > 0) {
+    lines.push("");
+    lines.push(style("Needs Attention", "warn", options));
+    for (const task of visible.needsAttention) {
+      lines.push(formatTaskRow(task, now, options));
+    }
   }
 
   if (visible.terminal.length > 0) {
@@ -239,6 +250,7 @@ function summarize(tasks: TaskSnapshot[]) {
     exited: counts.get("exited") ?? 0,
     cleanupPending: tasks.filter((task) => terminalStates.has(task.state) && task.worktreePath)
       .length,
+    needsAttention: tasks.filter(needsAttention).length,
     reposTouched: repos.size,
     medianRuntime: formatDuration(median(durations)),
     longestRuntime: formatDuration(durations.at(-1))
@@ -274,6 +286,7 @@ function selectVisibleTasks(
   tasks: TaskSnapshot[];
   active: TaskSnapshot[];
   terminal: TaskSnapshot[];
+  needsAttention: TaskSnapshot[];
   hiddenTerminal: number;
 } {
   const active = tasks
@@ -282,27 +295,32 @@ function selectVisibleTasks(
   const terminal = tasks
     .filter((task) => terminalStates.has(task.state))
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+  const attention = terminal.filter(needsAttention);
+  const ordinaryTerminal = terminal.filter((task) => !needsAttention(task));
   const visibleTerminal = options.showAll
-    ? terminal
-    : terminal
+    ? ordinaryTerminal
+    : ordinaryTerminal
         .filter((task) => now - Date.parse(task.updatedAt) <= freshTerminalWindowMs)
         .slice(0, maxDefaultTerminalRows);
   return {
-    tasks: [...active, ...visibleTerminal],
+    tasks: [...active, ...attention, ...visibleTerminal],
     active,
+    needsAttention: attention,
     terminal: visibleTerminal,
-    hiddenTerminal: terminal.length - visibleTerminal.length
+    hiddenTerminal: ordinaryTerminal.length - visibleTerminal.length
   };
 }
 
 function formatTaskRow(task: TaskSnapshot, now: number, options: DashboardOptions): string {
-  const prefix = activeStates.has(task.state) ? ">>" : "  ";
+  const prefix = activeStates.has(task.state) ? ">>" : needsAttention(task) ? "!!" : "  ";
   const target = formatTarget(task).padEnd(16);
   const state = stateBadge(task, options).padEnd(options.color ? 26 : 16);
   const age = activeStates.has(task.state)
     ? `running ${formatAge(Date.parse(task.createdAt), now)}`
     : `updated ${formatAge(Date.parse(task.updatedAt), now)} ago`;
-  const quiet = activeStates.has(task.state) ? `quiet ${formatQuiet(task, now)}` : formatExit(task);
+  const quiet = activeStates.has(task.state)
+    ? `quiet ${formatQuiet(task, now)}`
+    : formatTerminalStatus(task);
   return [prefix, task.id.slice(0, 8), state, target, formatSession(task), age, quiet]
     .filter(Boolean)
     .join("  ");
@@ -325,11 +343,28 @@ function stateBadge(task: TaskSnapshot, options: DashboardOptions): string {
   return style(`[${label}]`, "bad", options);
 }
 
-function formatExit(task: TaskSnapshot): string {
+function formatTerminalStatus(task: TaskSnapshot): string {
+  if (needsAttention(task)) {
+    const reasons = [];
+    if (task.worktreePath) {
+      reasons.push("worktree");
+    }
+    if (task.state !== "exited") {
+      reasons.push(task.state);
+    }
+    return `needs ${reasons.join("+")}`;
+  }
   if (task.exitCode !== undefined) {
     return `exit ${task.exitCode}`;
   }
   return "";
+}
+
+function needsAttention(task: TaskSnapshot): boolean {
+  if (!terminalStates.has(task.state)) {
+    return false;
+  }
+  return Boolean(task.worktreePath) || task.state !== "exited" || (task.exitCode ?? 0) !== 0;
 }
 
 function formatQuiet(task: TaskSnapshot, now: number): string {
