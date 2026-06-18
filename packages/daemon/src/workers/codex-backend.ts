@@ -22,25 +22,36 @@ export class CodexWorkerBackend implements WorkerBackend {
     try {
       await client.connect(transport, { timeout: 30_000 });
       const result = await client.callTool(
-        {
-          name: "codex",
-          arguments: stripUndefined({
-            prompt: input.request.prompt,
-            cwd,
-            model: process.env.CODEX_FLEET_CODEX_MODEL ?? process.env.CODEX_FLEET_E2E_MODEL,
-            sandbox:
-              input.request.deliveryMode === "research_only" ? "read-only" : "danger-full-access",
-            "approval-policy": "never",
-            "developer-instructions": workerInstructions(input)
-          })
-        },
+        input.codexThreadId
+          ? {
+              name: "codex-reply",
+              arguments: {
+                prompt: input.request.prompt,
+                threadId: input.codexThreadId
+              }
+            }
+          : {
+              name: "codex",
+              arguments: stripUndefined({
+                prompt: input.request.prompt,
+                cwd,
+                model: process.env.CODEX_FLEET_CODEX_MODEL ?? process.env.CODEX_FLEET_E2E_MODEL,
+                sandbox:
+                  input.request.deliveryMode === "research_only"
+                    ? "read-only"
+                    : "danger-full-access",
+                "approval-policy": "never",
+                "developer-instructions": workerInstructions(input)
+              })
+            },
         undefined,
         { timeout: Number(process.env.CODEX_FLEET_CODEX_TIMEOUT_MS ?? "600000") }
       );
       const parsed = parseCodexResult(result);
       return {
         exitCode: 0,
-        finalResponsePreview: preview(parsed.content ?? "")
+        finalResponsePreview: preview(parsed.content ?? ""),
+        codexThreadId: parsed.threadId
       };
     } finally {
       await client.close().catch(() => undefined);

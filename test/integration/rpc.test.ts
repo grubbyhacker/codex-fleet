@@ -118,4 +118,88 @@ describe("daemon rpc", () => {
       rmSync(root, { force: true, recursive: true });
     }
   });
+
+  it("resumes an exited task on the same task id and worker thread", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-rpc-resume-"));
+    const paths = resolveFleetPaths(root);
+    const daemon = await startDaemon(paths);
+    const orchestrator = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: orchestrator.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "first turn"
+      })) as { taskId: string };
+      const first = await waitUntilExited(rpc, delegated.taskId);
+      expect(first.task.codexThreadId).toBe(`fake-thread-${delegated.taskId}`);
+
+      const resumed = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        resumeTaskId: delegated.taskId,
+        prompt: "second turn"
+      })) as { taskId: string };
+      expect(resumed.taskId).toBe(delegated.taskId);
+
+      const second = await waitUntilExited(rpc, delegated.taskId);
+      expect(second.task.codexThreadId).toBe(first.task.codexThreadId);
+      const history = (await callDaemon(rpc, "get_task_history", {
+        taskId: delegated.taskId
+      })) as { events: Array<{ type: string }> };
+      expect(history.events).toContainEqual(expect.objectContaining({ type: "task_resumed" }));
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("returns immediately when returnOnStatuses already matches", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-rpc-return-status-"));
+    const paths = resolveFleetPaths(root);
+    const daemon = await startDaemon(paths);
+    const orchestrator = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: orchestrator.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "return status"
+      })) as { taskId: string };
+      await waitUntilExited(rpc, delegated.taskId);
+
+      const startedAt = performance.now();
+      const waited = (await callDaemon(rpc, "wait_tasks", {
+        taskIds: [delegated.taskId],
+        sinceEventSeq: 999,
+        maxWaitSeconds: 1,
+        returnOnStatuses: ["exited"]
+      })) as { snapshots: Array<{ state: string }> };
+      expect(performance.now() - startedAt).toBeLessThan(200);
+      expect(waited.snapshots[0]?.state).toBe("exited");
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
 });
+
+async function waitUntilExited(
+  rpc: { socketPath: string; clientId: string; token: string },
+  taskId: string
+): Promise<{ task: { state: string; codexThreadId?: string } }> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const result = (await callDaemon(rpc, "get_task", { taskId })) as {
+      task: { state: string; codexThreadId?: string };
+    };
+    if (result.task.state === "exited") {
+      return result;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return (await callDaemon(rpc, "get_task", { taskId })) as {
+    task: { state: string; codexThreadId?: string };
+  };
+}

@@ -14,6 +14,7 @@ import {
   type ModelTier,
   type OwnerSession,
   type RpcEnvelope,
+  type TaskSnapshot,
   type TargetDescriptor
 } from "@codex-fleet/shared";
 
@@ -116,6 +117,10 @@ export class FleetService {
     clientId: string,
     request: ReturnType<typeof delegateTaskRequestSchema.parse>
   ): Promise<{ taskId: string }> {
+    if (request.resumeTaskId) {
+      return this.resumeTask(clientId, request);
+    }
+
     const taskId = randomUUID();
     const createdAt = new Date().toISOString();
     const ownerSession = this.ownerFor(clientId);
@@ -174,6 +179,40 @@ export class FleetService {
     return { taskId };
   }
 
+  private resumeTask(
+    clientId: string,
+    request: ReturnType<typeof delegateTaskRequestSchema.parse>
+  ): { taskId: string } {
+    const task = this.requireTask(clientId, request.resumeTaskId ?? "");
+    if (task.state === "running" || task.state === "stale") {
+      throw new FleetError("conflict", `Task "${task.id}" is already running`, "get_task");
+    }
+    if (JSON.stringify(task.target) !== JSON.stringify(request.target)) {
+      throw new FleetError("conflict", `resumeTaskId target must match task "${task.id}"`);
+    }
+
+    const now = new Date().toISOString();
+    this.append("task_resumed", task.id, {
+      promptPreview: preview(request.prompt),
+      deliveryMode: request.deliveryMode,
+      risk: request.risk,
+      requestedModel: request.modelTier
+    });
+    this.append("task_state", task.id, {
+      state: "running",
+      lastActivityAt: now
+    } satisfies TaskStatePayload);
+    void this.runWorker({
+      taskId: task.id,
+      request,
+      branch: task.branch,
+      worktreePath: task.worktreePath,
+      codexThreadId: task.codexThreadId
+    });
+
+    return { taskId: task.id };
+  }
+
   private async runWorker(input: Parameters<WorkerBackend["run"]>[0]): Promise<void> {
     try {
       const result = await this.workerBackend.run(input);
@@ -181,6 +220,7 @@ export class FleetService {
         state: "exited",
         exitCode: result.exitCode,
         finalResponsePreview: result.finalResponsePreview,
+        codexThreadId: result.codexThreadId,
         lastActivityAt: new Date().toISOString()
       } satisfies TaskStatePayload);
     } catch (error) {
@@ -198,13 +238,14 @@ export class FleetService {
     request: ReturnType<typeof waitTasksRequestSchema.parse>,
     client?: ClientRecord
   ) {
+    let snapshots = request.taskIds.map((taskId) => this.requireTask(clientId, taskId, client));
     let events = this.state.eventsSince(request.sinceEventSeq, request.taskIds);
-    if (events.length === 0) {
+    if (events.length === 0 && !matchesReturnStatus(snapshots, request.returnOnStatuses)) {
       await sleep(Math.min(request.maxWaitSeconds ?? 5, 45) * 1000);
       this.refreshStaleTasks();
+      snapshots = request.taskIds.map((taskId) => this.requireTask(clientId, taskId, client));
       events = this.state.eventsSince(request.sinceEventSeq, request.taskIds);
     }
-    const snapshots = request.taskIds.map((taskId) => this.requireTask(clientId, taskId, client));
     return {
       snapshots,
       events,
@@ -364,6 +405,15 @@ function tierRank(tier: ModelTier): number {
 
 function hasFleetReadAccess(client?: ClientRecord): boolean {
   return client?.role === "cli" || client?.role === "dashboard";
+}
+
+function matchesReturnStatus(
+  snapshots: TaskSnapshot[],
+  statuses?: ReturnType<typeof waitTasksRequestSchema.parse>["returnOnStatuses"]
+): boolean {
+  return Boolean(
+    statuses?.some((status) => snapshots.some((snapshot) => snapshot.state === status))
+  );
 }
 
 async function sleep(ms: number): Promise<void> {

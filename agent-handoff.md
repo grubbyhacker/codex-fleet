@@ -112,3 +112,17 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Do a final v1 gap pass against `docs/DESIGN.md` and `docs/V1_IMPLEMENTATION_PLAN.md`.
+
+## 2026-06-18 Resume And Wait Semantics
+
+### Did
+
+- Added durable `codexThreadId` to task snapshots and replayed state.
+- Made Codex workers call `codex-reply` with the existing thread id when resuming.
+- Made `delegate_task` with `resumeTaskId` reuse the original task id, worktree, branch, and thread.
+- Implemented `wait_tasks.returnOnStatuses` short-circuiting.
+- Verified focused RPC/schema/event-store tests and aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Continue final v1 gap pass, especially sparse E2E coverage shape and any remaining operational edge cases.

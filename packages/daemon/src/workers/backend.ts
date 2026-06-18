@@ -5,11 +5,13 @@ export type WorkerInput = {
   request: DelegateTaskRequest;
   worktreePath?: string;
   branch?: string;
+  codexThreadId?: string;
 };
 
 export type WorkerResult = {
   exitCode: number;
   finalResponsePreview: string;
+  codexThreadId?: string;
 };
 
 export interface WorkerBackend {
@@ -26,7 +28,8 @@ export class FakeWorkerBackend implements WorkerBackend {
     const target = "repo" in input.request.target ? `repo ${input.request.target.repo}` : "shell";
     return {
       exitCode: 0,
-      finalResponsePreview: `fake worker accepted ${input.request.deliveryMode} task for ${target}`
+      finalResponsePreview: `fake worker accepted ${input.request.deliveryMode} task for ${target}`,
+      codexThreadId: input.codexThreadId ?? `fake-thread-${input.taskId}`
     };
   }
 }

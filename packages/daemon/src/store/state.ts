@@ -18,6 +18,7 @@ export type TaskStatePayload = {
   exitCode?: number;
   finalResponsePreview?: string;
   lastActivityAt?: string;
+  codexThreadId?: string;
 };
 
 export type TaskResourcePayload = {
@@ -73,7 +74,8 @@ export class FleetState {
         state: payload.state,
         exitCode: payload.exitCode,
         finalResponsePreview: payload.finalResponsePreview,
-        lastActivityAt: payload.lastActivityAt ?? event.ts
+        lastActivityAt: payload.lastActivityAt ?? event.ts,
+        codexThreadId: payload.codexThreadId ?? existing.codexThreadId
       });
       return;
     }
