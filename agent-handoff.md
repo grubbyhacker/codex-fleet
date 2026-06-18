@@ -85,3 +85,16 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Continue with daemon startup hardening, LaunchAgent install support, and remaining model-routing hardening.
+
+## 2026-06-18 Startup Hardening And LaunchAgent
+
+### Did
+
+- Moved root refusal and socket hardening into daemon startup, including active-socket refusal and stale socket cleanup.
+- Added startup coverage for active daemon sockets and stale socket-path leftovers.
+- Added `codex-fleet service launch-agent print|install|uninstall` for macOS LaunchAgent plist management.
+- Verified focused hardening/CLI tests and aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Continue remaining v1 hardening around model-tier availability/fallback and any final design-plan gaps.

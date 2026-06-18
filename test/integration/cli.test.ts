@@ -81,6 +81,20 @@ describe("cli views", () => {
       rmSync(root, { force: true, recursive: true });
     }
   });
+
+  it("prints a macOS LaunchAgent plist", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-cli-service-"));
+    try {
+      const plist = await runCli(root, "service", "launch-agent", "print");
+      expect(plist).toContain("dev.codex-fleet.daemon");
+      expect(plist).toContain("<string>daemon</string>");
+      expect(plist).toContain("<string>run</string>");
+      expect(plist).toContain("CODEX_FLEET_STATE_DIR");
+      expect(plist).toContain(root);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
 });
 
 async function runCli(root: string, ...args: string[]): Promise<string> {

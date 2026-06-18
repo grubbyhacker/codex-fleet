@@ -8,7 +8,10 @@ import {
 } from "@codex-fleet/daemon";
 import type { TaskSnapshot } from "@codex-fleet/shared";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export function cliProbe(): { ok: true; command: string } {
   return { ok: true, command: "codex-fleet" };
@@ -121,6 +124,24 @@ if (import.meta.main) {
       ? await forceCleanup(taskId)
       : await callDaemon(loadRpcOptions(), "end_task", { taskId });
     console.log(JSON.stringify(result, null, 2));
+  }
+
+  if (command === "service" && subcommand === "launch-agent") {
+    const action = args[0];
+    if (action === "print") {
+      process.stdout.write(renderLaunchAgentPlist());
+    } else if (action === "install") {
+      const plistPath = launchAgentPath();
+      mkdirSync(dirname(plistPath), { recursive: true });
+      writeFileSync(plistPath, renderLaunchAgentPlist(), { mode: 0o644 });
+      console.log(JSON.stringify({ installed: true, plistPath }, null, 2));
+    } else if (action === "uninstall") {
+      const plistPath = launchAgentPath();
+      rmSync(plistPath, { force: true });
+      console.log(JSON.stringify({ uninstalled: true, plistPath }, null, 2));
+    } else {
+      throw new Error("Usage: codex-fleet service launch-agent <print|install|uninstall>");
+    }
   }
 }
 
@@ -236,4 +257,55 @@ function dirtyFileCount(worktreePath: string): number {
 
 function isTerminal(state: TaskSnapshot["state"]): boolean {
   return ["exited", "failed_to_start", "cancelled", "timed_out"].includes(state);
+}
+
+export function renderLaunchAgentPlist(): string {
+  const paths = resolveFleetPaths();
+  const cliPath = fileURLToPath(import.meta.url);
+  const env = process.env.CODEX_FLEET_STATE_DIR
+    ? `
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CODEX_FLEET_STATE_DIR</key>
+    <string>${escapePlist(process.env.CODEX_FLEET_STATE_DIR)}</string>
+  </dict>`
+    : "";
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.codex-fleet.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${escapePlist(process.execPath)}</string>
+    <string>run</string>
+    <string>${escapePlist(cliPath)}</string>
+    <string>daemon</string>
+    <string>run</string>
+  </array>${env}
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${escapePlist(join(paths.rootDir, "launchd.out.log"))}</string>
+  <key>StandardErrorPath</key>
+  <string>${escapePlist(join(paths.rootDir, "launchd.err.log"))}</string>
+</dict>
+</plist>
+`;
+}
+
+function launchAgentPath(): string {
+  return join(homedir(), "Library", "LaunchAgents", "dev.codex-fleet.daemon.plist");
+}
+
+function escapePlist(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
 }

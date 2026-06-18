@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import net from "node:net";
 
 import { rpcEnvelopeSchema, type DaemonResponse } from "@codex-fleet/shared";
@@ -15,9 +15,11 @@ export type RunningDaemon = {
 };
 
 export async function startDaemon(paths: FleetPaths): Promise<RunningDaemon> {
+  assertNotRoot();
   ensureStateLayout(paths);
+  verifyStateLayout(paths);
   if (existsSync(paths.socketPath)) {
-    rmSync(paths.socketPath);
+    await removeStaleSocket(paths.socketPath);
   }
 
   const service = new FleetService(paths);
@@ -54,6 +56,49 @@ export async function startDaemon(paths: FleetPaths): Promise<RunningDaemon> {
       }
     }
   };
+}
+
+function assertNotRoot(): void {
+  if (typeof process.getuid === "function" && process.getuid() === 0) {
+    throw new Error("codex-fleet daemon must not run as root");
+  }
+}
+
+function verifyStateLayout(paths: FleetPaths): void {
+  const mode = statSync(paths.rootDir).mode & 0o777;
+  if (mode !== 0o700) {
+    throw new Error(`codex-fleet state dir must be 0700: ${paths.rootDir} is ${mode.toString(8)}`);
+  }
+}
+
+async function removeStaleSocket(socketPath: string): Promise<void> {
+  if (await socketAcceptsConnections(socketPath)) {
+    throw new Error(`codex-fleet daemon socket is already active: ${socketPath}`);
+  }
+  rmSync(socketPath);
+}
+
+async function socketAcceptsConnections(socketPath: string): Promise<boolean> {
+  return await new Promise<boolean>((resolve, reject) => {
+    const socket = net.createConnection(socketPath);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      resolve(false);
+    }, 200);
+    socket.once("connect", () => {
+      clearTimeout(timer);
+      socket.end();
+      resolve(true);
+    });
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      clearTimeout(timer);
+      if (error.code === "ENOENT" || error.code === "ECONNREFUSED" || error.code === "ENOTSOCK") {
+        resolve(false);
+        return;
+      }
+      reject(error);
+    });
+  });
 }
 
 async function handleLine(
