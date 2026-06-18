@@ -126,6 +126,7 @@ export class FleetService {
     const ownerSession = this.ownerFor(clientId);
     let defaultModelTier: ModelTier = "standard";
     let repoForWorktree: ReturnType<RepoRegistry["get"]>;
+    let repoBaseCheckout: string | undefined;
     let branch: string | undefined;
     let worktreePath: string | undefined;
 
@@ -140,6 +141,7 @@ export class FleetService {
       }
       defaultModelTier = repo.defaultModelTier;
       repoForWorktree = repo;
+      repoBaseCheckout = repo.baseCheckout;
     }
 
     const modelRouting = routeModelTier(request, defaultModelTier);
@@ -174,7 +176,7 @@ export class FleetService {
       state: "running",
       lastActivityAt: createdAt
     } satisfies TaskStatePayload);
-    void this.runWorker({ taskId, request, branch, worktreePath });
+    void this.runWorker({ taskId, request, repoBaseCheckout, branch, worktreePath });
 
     return { taskId };
   }

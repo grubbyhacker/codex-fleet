@@ -3,6 +3,7 @@ import type { DelegateTaskRequest } from "@codex-fleet/shared";
 export type WorkerInput = {
   taskId: string;
   request: DelegateTaskRequest;
+  repoBaseCheckout?: string;
   worktreePath?: string;
   branch?: string;
   codexThreadId?: string;

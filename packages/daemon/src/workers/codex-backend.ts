@@ -12,7 +12,7 @@ type CodexToolResult = {
 
 export class CodexWorkerBackend implements WorkerBackend {
   async run(input: WorkerInput): Promise<WorkerResult> {
-    const cwd = input.worktreePath ?? process.cwd();
+    const cwd = input.worktreePath ?? input.repoBaseCheckout ?? process.cwd();
     const transport = new StdioClientTransport({
       command: resolveCodexCommand(),
       args: ["mcp-server"],
@@ -92,14 +92,16 @@ export function workerBackendFromEnv(): WorkerBackend {
 import { FakeWorkerBackend } from "./backend.js";
 
 function workerInstructions(input: WorkerInput): string {
-  const worktree = input.worktreePath
+  const workspace = input.worktreePath
     ? `You're in a fresh git worktree at ${input.worktreePath}. Before working, make the environment ready per AGENTS.md; if a tool reports "not trusted," trust it for this path.`
-    : "You are running as a Codex Fleet shell worker with host access and no repo worktree.";
+    : input.repoBaseCheckout
+      ? `You are doing read-only repo research in the registered base checkout at ${input.repoBaseCheckout}. Do not modify files, create branches, or change git state.`
+      : "You are running as a Codex Fleet shell worker with host access and no repo worktree.";
   return [
     "You are a task-scoped worker agent in a local Codex Fleet.",
     `Task id: ${input.taskId}`,
     input.branch ? `Branch: ${input.branch}` : undefined,
-    worktree,
+    workspace,
     "Keep responses concise and report concrete paths and commands."
   ]
     .filter((line): line is string => Boolean(line))
