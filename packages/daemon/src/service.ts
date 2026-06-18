@@ -30,7 +30,7 @@ import { EventLog } from "./store/event-log.js";
 import { FleetState, type TaskCreatedPayload, type TaskStatePayload } from "./store/state.js";
 import type { WorkerBackend } from "./workers/backend.js";
 import { workerBackendFromEnv } from "./workers/codex-backend.js";
-import { WorktreeManager } from "./worktree/worktree-manager.js";
+import { resolveFreshDefaultStartPoint, WorktreeManager } from "./worktree/worktree-manager.js";
 
 type WorktreePostRunStatus = {
   worktreePath: string;
@@ -266,7 +266,8 @@ export class FleetService {
     }
 
     const repo = this.registry.get(input.request.target.repo);
-    const baseBranch = repo?.defaultBranch;
+    const baseRef = repo ? resolveFreshDefaultStartPoint(repo) : undefined;
+    const baseBranch = displayBaseRef(baseRef);
     const status: WorktreePostRunStatus = {
       worktreePath: input.worktreePath,
       branch: input.branch,
@@ -296,12 +297,12 @@ export class FleetService {
         untrackedFiles
       });
 
-      if (baseBranch) {
+      if (baseRef) {
         const [behind, ahead] = gitOutput(input.worktreePath, [
           "rev-list",
           "--left-right",
           "--count",
-          `${baseBranch}...HEAD`
+          `${baseRef}...HEAD`
         ])
           .split(/\s+/)
           .map((value) => Number.parseInt(value, 10));
@@ -409,6 +410,10 @@ function gitOutput(cwd: string, args: string[]): string {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   }).trim();
+}
+
+function displayBaseRef(baseRef: string | undefined): string | undefined {
+  return baseRef?.replace(/^refs\/remotes\//, "");
 }
 
 function worktreeAttention(deliveryMode: DeliveryMode, status: WorktreePostRunStatus): string[] {

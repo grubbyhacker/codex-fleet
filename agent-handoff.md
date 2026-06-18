@@ -226,3 +226,13 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 - Annotated final task responses when `pr_for_review`/`full_delivery`/`push_to_main` exits with uncommitted files or no commits ahead of the base branch.
 - Added regression coverage for a review task that writes an untracked file and exits without committing.
 - Rebuilt/installed standalone binaries, restarted the LaunchAgent daemon, and verified aggregate `mise exec -- bun run check`.
+
+## 2026-06-18 Fresh Remote Worktree Bases
+
+### Did
+
+- Investigated vps-ops PR #39 conflict and found Fleet created task branch `fleet/vps-ops/cbbe5a95` from stale local `main` (`d60e0a7`) after PR #38 had already merged into `origin/main` (`8419623`).
+- Fixed repo worktree creation to fetch `origin/<defaultBranch>` and create task branches from `refs/remotes/origin/<defaultBranch>` when an `origin` remote exists.
+- Updated post-run worktree status inspection to compare against the freshly fetched remote default branch instead of stale local `main`.
+- Added regression coverage for a stale local main with an advanced remote default branch.
+- Rebuilt/installed standalone binaries, restarted the LaunchAgent daemon, and verified aggregate `mise exec -- bun run check`.

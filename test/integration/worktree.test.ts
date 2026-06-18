@@ -76,6 +76,46 @@ describe("repo registry and worktree isolation", () => {
     }
   });
 
+  it("creates repo worktrees from freshly fetched origin default branch", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-worktree-origin-"));
+    const repo = join(root, "base-repo");
+    const remote = join(root, "remote.git");
+    const updater = join(root, "updater");
+    initRepo(repo);
+    execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: repo, stdio: "ignore" });
+    execFileSync("git", ["push", "-u", "origin", "main"], { cwd: repo, stdio: "ignore" });
+    execFileSync("git", ["clone", remote, updater], { stdio: "ignore" });
+    writeFileSync(join(updater, "REMOTE.md"), "# remote-only\n");
+    execFileSync("git", ["add", "REMOTE.md"], { cwd: updater, stdio: "ignore" });
+    commit(updater, "advance origin main");
+    execFileSync("git", ["push", "origin", "main"], { cwd: updater, stdio: "ignore" });
+
+    const paths = resolveFleetPaths(join(root, "fleet"));
+    writeRepoRegistry(paths.rootDir, paths.reposPath, repo);
+    const daemon = await startDaemon(paths);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      expect(existsSync(join(repo, "REMOTE.md"))).toBe(false);
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { repo: "fixture" },
+        deliveryMode: "patch",
+        prompt: "inspect fresh base"
+      })) as { taskId: string };
+      const task = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
+        task: { worktreePath?: string };
+      };
+      expect(readFileSync(join(task.task.worktreePath ?? "", "REMOTE.md"), "utf8")).toBe(
+        "# remote-only\n"
+      );
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("reports review tasks that leave uncommitted files and empty branches", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-worktree-postcheck-"));
     const repo = join(root, "base-repo");
@@ -173,6 +213,10 @@ function initRepo(path: string): void {
   execFileSync("git", ["init", "-b", "main", path], { stdio: "ignore" });
   writeFileSync(join(path, "README.md"), "# fixture\n");
   execFileSync("git", ["add", "README.md"], { cwd: path, stdio: "ignore" });
+  commit(path, "init");
+}
+
+function commit(path: string, message: string): void {
   execFileSync(
     "git",
     [
@@ -182,7 +226,7 @@ function initRepo(path: string): void {
       "user.email=fleet@example.test",
       "commit",
       "-m",
-      "init"
+      message
     ],
     { cwd: path, stdio: "ignore" }
   );
