@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,7 +19,7 @@ describeCodex("real codex e2e", () => {
     console.warn(`Running paid Codex E2E preflight with model ${model}`);
     const output = await runCodexPreflight(model);
     expect(output).toContain("codex-fleet-preflight-ok");
-  });
+  }, 180_000);
 
   it("runs a minimal shell research task through the daemon", async () => {
     const model = process.env.CODEX_FLEET_E2E_MODEL ?? "gpt-5.3-codex-spark";
@@ -48,7 +48,7 @@ describeCodex("real codex e2e", () => {
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });
     }
-  });
+  }, 180_000);
 
   it("patches a tiny repo in an isolated worktree without touching the base checkout", async () => {
     const model = process.env.CODEX_FLEET_E2E_MODEL ?? "gpt-5.3-codex-spark";
@@ -90,11 +90,12 @@ describeCodex("real codex e2e", () => {
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });
     }
-  });
+  }, 180_000);
 });
 
 async function runCodexPreflight(model: string): Promise<string> {
-  const proc = Bun.spawn(
+  const proc = spawn(
+    "codex",
     [
       "codex",
       "exec",
@@ -103,22 +104,33 @@ async function runCodexPreflight(model: string): Promise<string> {
       "-m",
       model,
       "Reply exactly: codex-fleet-preflight-ok"
-    ],
+    ].slice(1),
     {
       cwd: tmpdir(),
-      stderr: "pipe",
-      stdout: "pipe"
+      stdio: ["ignore", "pipe", "pipe"]
     }
   );
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited
-  ]);
+  const [stdout, stderr, exitCode] = await collectProcess(proc);
   if (exitCode !== 0) {
     throw new Error(`Codex preflight failed for model ${model}: ${stderr}`);
   }
   return stdout;
+}
+
+async function collectProcess(proc: ReturnType<typeof spawn>): Promise<[string, string, number]> {
+  const stdoutChunks: Buffer[] = [];
+  const stderrChunks: Buffer[] = [];
+  proc.stdout?.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+  proc.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+  const exitCode = await new Promise<number>((resolve, reject) => {
+    proc.once("error", reject);
+    proc.once("close", (code) => resolve(code ?? 1));
+  });
+  return [
+    Buffer.concat(stdoutChunks).toString("utf8"),
+    Buffer.concat(stderrChunks).toString("utf8"),
+    exitCode
+  ];
 }
 
 function useCodexBackend(model: string): () => void {

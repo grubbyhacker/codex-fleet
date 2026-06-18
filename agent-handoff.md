@@ -139,3 +139,15 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Final pass for any remaining v1 gaps; paid Codex E2E has not been run in this slice.
+
+## 2026-06-18 Sparse E2E Verification
+
+### Did
+
+- Fixed the opt-in E2E harness to use Node-compatible process spawning and longer per-test timeouts.
+- Ran `CODEX_FLEET_RUN_CODEX_E2E=1 CODEX_FLEET_E2E_MODEL=gpt-5.3-codex-spark mise exec -- bun run test:e2e:codex`; all 3 sparse real-Codex tests passed.
+- Re-ran aggregate `mise exec -- bun run check`; normal checks remain green and skip paid E2E.
+
+### Next
+
+- Final status pass and close v1 if no remaining plan/design gaps require implementation.
