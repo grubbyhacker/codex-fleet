@@ -1,10 +1,12 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
 import {
+  captureTextStream,
   codexWorkerResultFromToolResult,
   codexWorkerToolArguments,
   resolveCodexCommand
@@ -117,6 +119,18 @@ describe("codex worker backend", () => {
       finalResponse: content,
       finalResponsePreview: content
     });
+  });
+
+  it("captures bounded worker stderr text", () => {
+    const stream = new PassThrough();
+    const capture = captureTextStream(stream, 12);
+
+    stream.write("first line\n");
+    stream.write("second line\n");
+    capture.dispose();
+    stream.write("ignored\n");
+
+    expect(capture.read()).toBe("second line\n");
   });
 });
 

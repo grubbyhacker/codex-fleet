@@ -108,6 +108,8 @@ export const taskSnapshotSchema = z.object({
   exitCode: z.number().int().optional(),
   finalResponse: z.string().optional(),
   finalResponsePreview: z.string().optional(),
+  workerStderr: z.string().optional(),
+  workerStderrPreview: z.string().optional(),
   lastActivityAt: z.string().min(1).optional(),
   requestedModel: modelTierSchema.optional(),
   actualModel: modelTierSchema.optional(),

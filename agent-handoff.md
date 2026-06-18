@@ -249,3 +249,18 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Historical event-log records are append-only; the already-finished task above still shows its original exit code 0, but new matching failures will be nonzero and visible as attention items.
+
+## 2026-06-18 Worker Stderr Persistence
+
+### Did
+
+- Confirmed the daemon previously requested piped Codex worker stderr but did not read or persist it.
+- Added bounded per-worker stderr capture to the Codex backend.
+- Persisted `workerStderr` and `workerStderrPreview` in terminal task state, task snapshots, history events, and daemon replay.
+- Preserved worker startup/call failure messages as `finalResponse` alongside stderr.
+- Added regression coverage for stderr capture and RPC/restart persistence.
+- Rebuilt/installed standalone binaries, restarted the LaunchAgent daemon, and verified aggregate `mise exec -- bun run check`.
+
+### Next
+
+- TUI live activity should use Codex `codex/event` notifications plus this stderr field for process-level diagnostics.

@@ -14,10 +14,27 @@ export type WorkerResult = {
   finalResponse: string;
   finalResponsePreview: string;
   codexThreadId?: string;
+  workerStderr?: string;
+  workerStderrPreview?: string;
 };
 
 export interface WorkerBackend {
   run(input: WorkerInput): Promise<WorkerResult> | WorkerResult;
+}
+
+export class WorkerRunError extends Error {
+  readonly workerStderr?: string;
+  readonly workerStderrPreview?: string;
+
+  constructor(
+    message: string,
+    options: { cause?: unknown; workerStderr?: string; workerStderrPreview?: string } = {}
+  ) {
+    super(message, { cause: options.cause });
+    this.name = "WorkerRunError";
+    this.workerStderr = options.workerStderr;
+    this.workerStderrPreview = options.workerStderrPreview;
+  }
 }
 
 export class FakeWorkerBackend implements WorkerBackend {
@@ -35,7 +52,11 @@ export class FakeWorkerBackend implements WorkerBackend {
       exitCode: 0,
       finalResponse,
       finalResponsePreview: preview(finalResponse),
-      codexThreadId: input.codexThreadId ?? `fake-thread-${input.taskId}`
+      codexThreadId: input.codexThreadId ?? `fake-thread-${input.taskId}`,
+      workerStderr: process.env.CODEX_FLEET_FAKE_WORKER_STDERR,
+      workerStderrPreview: process.env.CODEX_FLEET_FAKE_WORKER_STDERR
+        ? preview(process.env.CODEX_FLEET_FAKE_WORKER_STDERR)
+        : undefined
     };
   }
 }

@@ -18,6 +18,8 @@ export type TaskStatePayload = {
   exitCode?: number;
   finalResponse?: string;
   finalResponsePreview?: string;
+  workerStderr?: string;
+  workerStderrPreview?: string;
   lastActivityAt?: string;
   codexThreadId?: string;
 };
@@ -76,6 +78,8 @@ export class FleetState {
         exitCode: payload.exitCode,
         finalResponse: payload.finalResponse,
         finalResponsePreview: payload.finalResponsePreview,
+        workerStderr: payload.workerStderr,
+        workerStderrPreview: payload.workerStderrPreview,
         lastActivityAt: payload.lastActivityAt ?? event.ts,
         codexThreadId: payload.codexThreadId ?? existing.codexThreadId
       });

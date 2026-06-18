@@ -178,6 +178,64 @@ describe("daemon rpc", () => {
     }
   });
 
+  it("persists worker stderr separately from final responses", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-rpc-stderr-"));
+    const paths = resolveFleetPaths(root);
+    const previousStderr = process.env.CODEX_FLEET_FAKE_WORKER_STDERR;
+    const stderr = Array.from({ length: 40 }, (_, index) => `stderr-${index}`).join(
+      " diagnostic line "
+    );
+    process.env.CODEX_FLEET_FAKE_WORKER_STDERR = stderr;
+    let daemon = await startDaemon(paths);
+    const orchestrator = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: orchestrator.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "stderr fixture"
+      })) as { taskId: string };
+      const task = await waitUntilExited(rpc, delegated.taskId);
+      expect(task.task.workerStderr).toBe(stderr);
+      expect(task.task.workerStderrPreview).not.toBe(stderr);
+      expect(task.task.workerStderrPreview?.length).toBeLessThan(stderr.length);
+
+      const waited = (await callDaemon(rpc, "wait_tasks", {
+        taskIds: [delegated.taskId],
+        sinceEventSeq: 999,
+        returnOnStatuses: ["exited"],
+        maxWaitSeconds: 1
+      })) as {
+        snapshots: Array<{ workerStderr?: string; workerStderrPreview?: string }>;
+      };
+      expect(waited.snapshots[0]?.workerStderr).toBe(stderr);
+
+      const history = (await callDaemon(rpc, "get_task_history", {
+        taskId: delegated.taskId
+      })) as { events: Array<{ type: string; summary: string }> };
+      const exited = [...history.events].reverse().find((event) => event.type === "task_state");
+      expect(JSON.parse(exited?.summary ?? "{}")).toMatchObject({
+        workerStderr: stderr
+      });
+
+      await daemon.close();
+      daemon = await startDaemon(paths);
+      const afterRestart = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
+        task: { workerStderr?: string };
+      };
+      expect(afterRestart.task.workerStderr).toBe(stderr);
+    } finally {
+      if (previousStderr === undefined) {
+        delete process.env.CODEX_FLEET_FAKE_WORKER_STDERR;
+      } else {
+        process.env.CODEX_FLEET_FAKE_WORKER_STDERR = previousStderr;
+      }
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("resumes an exited task on the same task id and worker thread", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-rpc-resume-"));
     const paths = resolveFleetPaths(root);
@@ -254,6 +312,8 @@ async function waitUntilExited(
     codexThreadId?: string;
     finalResponse?: string;
     finalResponsePreview?: string;
+    workerStderr?: string;
+    workerStderrPreview?: string;
   };
 }> {
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -263,6 +323,8 @@ async function waitUntilExited(
         codexThreadId?: string;
         finalResponse?: string;
         finalResponsePreview?: string;
+        workerStderr?: string;
+        workerStderrPreview?: string;
       };
     };
     if (result.task.state === "exited") {
@@ -276,6 +338,8 @@ async function waitUntilExited(
       codexThreadId?: string;
       finalResponse?: string;
       finalResponsePreview?: string;
+      workerStderr?: string;
+      workerStderrPreview?: string;
     };
   };
 }

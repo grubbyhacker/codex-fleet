@@ -1,9 +1,15 @@
 import { existsSync } from "node:fs";
+import type { Stream } from "node:stream";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-import type { WorkerBackend, WorkerInput, WorkerResult } from "./backend.js";
+import {
+  WorkerRunError,
+  type WorkerBackend,
+  type WorkerInput,
+  type WorkerResult
+} from "./backend.js";
 
 type CodexToolResult = {
   threadId?: string;
@@ -30,6 +36,7 @@ export class CodexWorkerBackend implements WorkerBackend {
       stderr: "pipe"
     });
     const client = new Client({ name: `codex-fleet-worker-${input.taskId}`, version: "0.0.0" });
+    const stderrCapture = captureTextStream(transport.stderr);
 
     try {
       await client.connect(transport, { timeout: 30_000 });
@@ -49,8 +56,16 @@ export class CodexWorkerBackend implements WorkerBackend {
         undefined,
         { timeout: Number(process.env.CODEX_FLEET_CODEX_TIMEOUT_MS ?? "600000") }
       );
-      return codexWorkerResultFromToolResult(result);
+      return withWorkerStderr(codexWorkerResultFromToolResult(result), stderrCapture.read());
+    } catch (error) {
+      const stderr = stderrCapture.read();
+      throw new WorkerRunError(error instanceof Error ? error.message : String(error), {
+        cause: error,
+        workerStderr: stderr || undefined,
+        workerStderrPreview: stderr ? preview(stderr) : undefined
+      });
     } finally {
+      stderrCapture.dispose();
       await client.close().catch(() => undefined);
     }
   }
@@ -189,6 +204,35 @@ function isCodexBackendError(content: string): boolean {
   } catch {
     return false;
   }
+}
+
+function withWorkerStderr(result: WorkerResult, stderr: string): WorkerResult {
+  if (!stderr) {
+    return result;
+  }
+  return {
+    ...result,
+    workerStderr: stderr,
+    workerStderrPreview: preview(stderr)
+  };
+}
+
+export function captureTextStream(
+  stream: Stream | null,
+  maxLength = 64 * 1024
+): { read: () => string; dispose: () => void } {
+  let text = "";
+  const onData = (chunk: string | Buffer): void => {
+    text += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+    if (text.length > maxLength) {
+      text = text.slice(text.length - maxLength);
+    }
+  };
+  stream?.on("data", onData);
+  return {
+    read: () => text,
+    dispose: () => stream?.off("data", onData)
+  };
 }
 
 function stripUndefined<T extends Record<string, unknown>>(value: T): T {

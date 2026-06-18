@@ -28,7 +28,7 @@ import type { ClientRecord } from "./rpc/auth.js";
 import { FleetError } from "./rpc/errors.js";
 import { EventLog } from "./store/event-log.js";
 import { FleetState, type TaskCreatedPayload, type TaskStatePayload } from "./store/state.js";
-import type { WorkerBackend } from "./workers/backend.js";
+import { WorkerRunError, type WorkerBackend } from "./workers/backend.js";
 import { workerBackendFromEnv } from "./workers/codex-backend.js";
 import { resolveFreshDefaultStartPoint, WorktreeManager } from "./worktree/worktree-manager.js";
 
@@ -245,14 +245,21 @@ export class FleetService {
         exitCode: result.exitCode,
         finalResponse,
         finalResponsePreview: preview(finalResponse, 500),
+        workerStderr: result.workerStderr,
+        workerStderrPreview: result.workerStderrPreview,
         codexThreadId: result.codexThreadId,
         lastActivityAt: new Date().toISOString()
       } satisfies TaskStatePayload);
     } catch (error) {
+      const workerStderr = error instanceof WorkerRunError ? error.workerStderr : undefined;
       this.append("task_state", input.taskId, {
         state: "failed_to_start",
+        finalResponse: error instanceof Error ? error.message : String(error),
         finalResponsePreview:
           error instanceof Error ? preview(error.message) : preview(String(error)),
+        workerStderr,
+        workerStderrPreview:
+          error instanceof WorkerRunError ? error.workerStderrPreview : undefined,
         lastActivityAt: new Date().toISOString()
       } satisfies TaskStatePayload);
     }
