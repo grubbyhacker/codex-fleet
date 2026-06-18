@@ -1,5 +1,10 @@
 import type { DelegateTaskRequest } from "@codex-fleet/shared";
 
+export type WorkerActivity = {
+  kind: "heartbeat" | "codex_event";
+  detail?: string;
+};
+
 export type WorkerInput = {
   taskId: string;
   request: DelegateTaskRequest;
@@ -7,6 +12,7 @@ export type WorkerInput = {
   worktreePath?: string;
   branch?: string;
   codexThreadId?: string;
+  onActivity?: (activity: WorkerActivity) => void;
 };
 
 export type WorkerResult = {
@@ -23,15 +29,22 @@ export interface WorkerBackend {
 }
 
 export class WorkerRunError extends Error {
+  readonly terminalState: "failed_to_start" | "timed_out";
   readonly workerStderr?: string;
   readonly workerStderrPreview?: string;
 
   constructor(
     message: string,
-    options: { cause?: unknown; workerStderr?: string; workerStderrPreview?: string } = {}
+    options: {
+      cause?: unknown;
+      terminalState?: "failed_to_start" | "timed_out";
+      workerStderr?: string;
+      workerStderrPreview?: string;
+    } = {}
   ) {
     super(message, { cause: options.cause });
     this.name = "WorkerRunError";
+    this.terminalState = options.terminalState ?? "failed_to_start";
     this.workerStderr = options.workerStderr;
     this.workerStderrPreview = options.workerStderrPreview;
   }

@@ -3,6 +3,8 @@ import type { Stream } from "node:stream";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { NotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 
 import {
   WorkerRunError,
@@ -26,6 +28,10 @@ type CodexBackendError = {
   status?: number;
 };
 
+const CodexEventNotificationSchema = NotificationSchema.extend({
+  method: z.literal("codex/event")
+}).loose();
+
 export class CodexWorkerBackend implements WorkerBackend {
   async run(input: WorkerInput): Promise<WorkerResult> {
     const cwd = input.worktreePath ?? input.repoBaseCheckout ?? process.cwd();
@@ -37,9 +43,20 @@ export class CodexWorkerBackend implements WorkerBackend {
     });
     const client = new Client({ name: `codex-fleet-worker-${input.taskId}`, version: "0.0.0" });
     const stderrCapture = captureTextStream(transport.stderr);
+    const heartbeat = setInterval(
+      () => {
+        input.onActivity?.({ kind: "heartbeat" });
+      },
+      Number(process.env.CODEX_FLEET_WORKER_HEARTBEAT_MS ?? "30000")
+    );
+    heartbeat.unref?.();
 
     try {
+      client.setNotificationHandler(CodexEventNotificationSchema, (notification) => {
+        input.onActivity?.({ kind: "codex_event", detail: codexEventDetail(notification) });
+      });
       await client.connect(transport, { timeout: 30_000 });
+      input.onActivity?.({ kind: "heartbeat", detail: "connected" });
       const result = await client.callTool(
         input.codexThreadId
           ? {
@@ -61,10 +78,12 @@ export class CodexWorkerBackend implements WorkerBackend {
       const stderr = stderrCapture.read();
       throw new WorkerRunError(error instanceof Error ? error.message : String(error), {
         cause: error,
+        terminalState: isTimeoutError(error) ? "timed_out" : "failed_to_start",
         workerStderr: stderr || undefined,
         workerStderrPreview: stderr ? preview(stderr) : undefined
       });
     } finally {
+      clearInterval(heartbeat);
       stderrCapture.dispose();
       await client.close().catch(() => undefined);
     }
@@ -233,6 +252,16 @@ export function captureTextStream(
     read: () => text,
     dispose: () => stream?.off("data", onData)
   };
+}
+
+function codexEventDetail(notification: z.infer<typeof CodexEventNotificationSchema>): string {
+  const params = notification.params as { msg?: { type?: unknown } } | undefined;
+  return typeof params?.msg?.type === "string" ? params.msg.type : "event";
+}
+
+function isTimeoutError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("Request timed out") || message.includes("-32001");
 }
 
 function stripUndefined<T extends Record<string, unknown>>(value: T): T {

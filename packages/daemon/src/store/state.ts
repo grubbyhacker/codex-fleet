@@ -29,6 +29,12 @@ export type TaskResourcePayload = {
   worktreePath?: string;
 };
 
+export type TaskActivityPayload = {
+  lastActivityAt: string;
+  kind?: string;
+  detail?: string;
+};
+
 export class FleetState {
   private readonly tasks = new Map<string, TaskSnapshot>();
   private readonly events: Event[] = [];
@@ -93,6 +99,16 @@ export class FleetState {
         updatedAt: event.ts,
         branch: payload.branch,
         worktreePath: payload.worktreePath
+      });
+      return;
+    }
+
+    if (event.type === "task_activity") {
+      const payload = parsePayload<TaskActivityPayload>(event);
+      this.tasks.set(event.taskId, {
+        ...existing,
+        updatedAt: event.ts,
+        lastActivityAt: payload.lastActivityAt
       });
     }
   }

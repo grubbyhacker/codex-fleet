@@ -264,3 +264,19 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - TUI live activity should use Codex `codex/event` notifications plus this stderr field for process-level diagnostics.
+
+## 2026-06-18 Worker Activity And Timeout Classification
+
+### Did
+
+- Investigated `youknowme` task `35909bfc-5386-412d-9200-8ce8d32b765e`: it did real work, opened PR #90, then Fleet recorded `failed_to_start` after a Codex MCP timeout.
+- Added worker activity callbacks and `task_activity` replay support so long-running Codex workers refresh `lastActivityAt` without changing task state.
+- Added Codex worker heartbeats plus lightweight `codex/event` activity notifications.
+- Classified Codex MCP timeout errors as `timed_out` instead of `failed_to_start`.
+- Fixed `codex-fleet cleanup run --task ... --dry-run` so it reports the candidate without deleting worktrees.
+- Added regression coverage for activity events, timeout state, and cleanup dry-run behavior.
+- Rebuilt/installed standalone binaries, restarted the LaunchAgent daemon, and verified aggregate `mise exec -- bun run check`.
+
+### Next
+
+- TUI can now display `task_activity` timestamps as freshness, but detailed live transcript panes still need sanitized `codex/event` persistence.

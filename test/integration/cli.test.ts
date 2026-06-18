@@ -64,6 +64,18 @@ describe("cli views", () => {
       expect(dryRun).toContain(clean.taskId);
       expect(dryRun).toContain("cleanup_ready");
 
+      const runDryRun = await runCli(
+        paths.rootDir,
+        "cleanup",
+        "run",
+        "--task",
+        clean.taskId,
+        "--dry-run"
+      );
+      expect(runDryRun).toContain('"dryRun": true');
+      expect(runDryRun).toContain("cleanup_ready");
+      expect(existsSync(cleanTask.worktreePath ?? "")).toBe(true);
+
       await runCli(paths.rootDir, "cleanup", "run", "--task", clean.taskId);
       expect(existsSync(cleanTask.worktreePath ?? "")).toBe(false);
 

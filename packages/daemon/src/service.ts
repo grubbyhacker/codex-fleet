@@ -27,7 +27,12 @@ import { RepoRegistry } from "./registry/repo-registry.js";
 import type { ClientRecord } from "./rpc/auth.js";
 import { FleetError } from "./rpc/errors.js";
 import { EventLog } from "./store/event-log.js";
-import { FleetState, type TaskCreatedPayload, type TaskStatePayload } from "./store/state.js";
+import {
+  FleetState,
+  type TaskActivityPayload,
+  type TaskCreatedPayload,
+  type TaskStatePayload
+} from "./store/state.js";
 import { WorkerRunError, type WorkerBackend } from "./workers/backend.js";
 import { workerBackendFromEnv } from "./workers/codex-backend.js";
 import { resolveFreshDefaultStartPoint, WorktreeManager } from "./worktree/worktree-manager.js";
@@ -233,8 +238,25 @@ export class FleetService {
   }
 
   private async runWorker(input: Parameters<WorkerBackend["run"]>[0]): Promise<void> {
+    let lastActivityEventAt = 0;
+    const activityInput = {
+      ...input,
+      onActivity: (activity: Parameters<NonNullable<typeof input.onActivity>>[0]) => {
+        const nowMs = Date.now();
+        if (nowMs - lastActivityEventAt < 10_000) {
+          return;
+        }
+        lastActivityEventAt = nowMs;
+        this.append("task_activity", input.taskId, {
+          lastActivityAt: new Date(nowMs).toISOString(),
+          kind: activity.kind,
+          detail: activity.detail
+        } satisfies TaskActivityPayload);
+      }
+    };
+
     try {
-      const result = await this.workerBackend.run(input);
+      const result = await this.workerBackend.run(activityInput);
       const worktreeStatus = this.inspectWorktreeAfterRun(input);
       if (worktreeStatus) {
         this.append("worktree_status", input.taskId, worktreeStatus);
@@ -253,7 +275,7 @@ export class FleetService {
     } catch (error) {
       const workerStderr = error instanceof WorkerRunError ? error.workerStderr : undefined;
       this.append("task_state", input.taskId, {
-        state: "failed_to_start",
+        state: error instanceof WorkerRunError ? error.terminalState : "failed_to_start",
         finalResponse: error instanceof Error ? error.message : String(error),
         finalResponsePreview:
           error instanceof Error ? preview(error.message) : preview(String(error)),

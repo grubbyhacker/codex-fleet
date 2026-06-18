@@ -116,7 +116,11 @@ if (import.meta.main) {
     const taskIndex = args.indexOf("--task");
     const taskId = taskIndex === -1 ? undefined : args[taskIndex + 1];
     if (!taskId) {
-      throw new Error("Usage: codex-fleet cleanup run --task <taskId> [--force]");
+      throw new Error("Usage: codex-fleet cleanup run --task <taskId> [--dry-run] [--force]");
+    }
+    if (args.includes("--dry-run")) {
+      console.log(JSON.stringify(await dryRunCleanup(taskId), null, 2));
+      process.exit(0);
     }
     const force = args.includes("--force");
     const result = force
@@ -175,6 +179,24 @@ async function listCleanupCandidates(): Promise<{
     candidates: result.tasks
       .filter((task) => task.worktreePath && isTerminal(task.state))
       .map((task) => classifyCleanupCandidate(task))
+  };
+}
+
+async function dryRunCleanup(taskId: string): Promise<{
+  dryRun: true;
+  taskId: string;
+  candidate: CleanupCandidate;
+}> {
+  const result = (await callDaemon(loadRpcOptions(), "get_task", { taskId })) as {
+    task: TaskSnapshot;
+  };
+  if (!result.task.worktreePath) {
+    throw new Error(`Task "${taskId}" has no worktree to clean`);
+  }
+  return {
+    dryRun: true,
+    taskId,
+    candidate: classifyCleanupCandidate(result.task)
   };
 }
 
