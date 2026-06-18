@@ -32,8 +32,10 @@ describe("cleanup", () => {
       const clean = await delegatePatch(rpc);
       const cleanTask = await getTask(rpc, clean.taskId);
       expect(existsSync(cleanTask.worktreePath ?? "")).toBe(true);
+      expect(branchExists(repo, cleanTask.branch ?? "")).toBe(true);
       await callDaemon(rpc, "end_task", { taskId: clean.taskId });
       expect(existsSync(cleanTask.worktreePath ?? "")).toBe(false);
+      expect(branchExists(repo, cleanTask.branch ?? "")).toBe(false);
 
       const dirty = await delegatePatch(rpc);
       const dirtyTask = await getTask(rpc, dirty.taskId);
@@ -62,9 +64,19 @@ async function getTask(
   taskId: string
 ) {
   const result = (await callDaemon(rpc, "get_task", { taskId })) as {
-    task: { worktreePath?: string };
+    task: { branch?: string; worktreePath?: string };
   };
   return result.task;
+}
+
+function branchExists(repo: string, branch: string): boolean {
+  if (!branch) {
+    return false;
+  }
+  return execFileSync("git", ["branch", "--list", branch], {
+    cwd: repo,
+    encoding: "utf8"
+  }).includes(branch);
 }
 
 function initRepo(path: string): void {

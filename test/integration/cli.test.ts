@@ -76,6 +76,7 @@ describe("cli views", () => {
 
       await runCli(paths.rootDir, "cleanup", "run", "--task", dirty.taskId, "--force");
       expect(existsSync(dirtyTask.worktreePath ?? "")).toBe(false);
+      expect(branchExists(repo, dirtyTask.branch ?? "")).toBe(false);
     } finally {
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });
@@ -138,9 +139,19 @@ async function getTask(
   taskId: string
 ) {
   const result = (await callDaemon(rpc, "get_task", { taskId })) as {
-    task: { worktreePath?: string };
+    task: { branch?: string; worktreePath?: string };
   };
   return result.task;
+}
+
+function branchExists(repo: string, branch: string): boolean {
+  if (!branch) {
+    return false;
+  }
+  return execFileSync("git", ["branch", "--list", branch], {
+    cwd: repo,
+    encoding: "utf8"
+  }).includes(branch);
 }
 
 function initRepo(path: string): void {

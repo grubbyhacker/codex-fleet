@@ -210,7 +210,7 @@ function classifyCleanupCandidate(task: TaskSnapshot): CleanupCandidate {
 async function forceCleanup(taskId: string): Promise<{
   accepted: true;
   taskId: string;
-  cleanup: { cleaned: boolean; forced: true };
+  cleanup: { cleaned: boolean; forced: true; branchDeleted: boolean };
 }> {
   const result = (await callDaemon(loadRpcOptions(), "get_task", { taskId })) as {
     task: TaskSnapshot;
@@ -228,7 +228,8 @@ async function forceCleanup(taskId: string): Promise<{
     stdio: "ignore"
   });
   execFileSync("git", ["worktree", "prune"], { cwd: repo.baseCheckout, stdio: "ignore" });
-  return { accepted: true, taskId, cleanup: { cleaned: true, forced: true } };
+  const branchDeleted = task.branch ? deleteBranchIfMerged(repo.baseCheckout, task.branch) : false;
+  return { accepted: true, taskId, cleanup: { cleaned: true, forced: true, branchDeleted } };
 }
 
 function loadRepoBaseCheckout(
@@ -253,6 +254,15 @@ function dirtyFileCount(worktreePath: string): number {
     .trim()
     .split("\n")
     .filter(Boolean).length;
+}
+
+function deleteBranchIfMerged(baseCheckout: string, branch: string): boolean {
+  try {
+    execFileSync("git", ["branch", "-d", branch], { cwd: baseCheckout, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isTerminal(state: TaskSnapshot["state"]): boolean {

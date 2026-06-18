@@ -151,3 +151,16 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Final status pass and close v1 if no remaining plan/design gaps require implementation.
+
+## 2026-06-18 Cleanup Branch Retention
+
+### Did
+
+- Added safe branch deletion after worktree cleanup using `git branch -d`.
+- Applied the same safe branch deletion to explicit CLI `cleanup run --task <id> --force`.
+- Added integration assertions for branch removal in daemon and CLI cleanup paths.
+- Verified focused cleanup/CLI tests and aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Final status pass and close v1 if no remaining plan/design gaps require implementation.

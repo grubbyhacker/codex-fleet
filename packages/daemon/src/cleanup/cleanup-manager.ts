@@ -7,6 +7,7 @@ import { FleetError } from "../rpc/errors.js";
 
 export type CleanupResult = {
   cleaned: boolean;
+  branchDeleted?: boolean;
   reason?: string;
 };
 
@@ -35,7 +36,20 @@ export class CleanupManager {
       cwd: repo.baseCheckout,
       stdio: "ignore"
     });
+    const branchDeleted = task.branch ? deleteBranchIfMerged(repo, task.branch) : false;
 
-    return { cleaned: true };
+    return { cleaned: true, branchDeleted };
+  }
+}
+
+export function deleteBranchIfMerged(repo: RepoConfig, branch: string): boolean {
+  try {
+    execFileSync("git", ["branch", "-d", branch], {
+      cwd: repo.baseCheckout,
+      stdio: "ignore"
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
