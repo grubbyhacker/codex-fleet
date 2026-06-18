@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,16 +14,20 @@ const runCodexE2e = process.env.CODEX_FLEET_RUN_CODEX_E2E === "1";
 const describeCodex = runCodexE2e ? describe : describe.skip;
 
 describeCodex("real codex e2e", () => {
+  it("preflights the configured Codex model", async () => {
+    const model = process.env.CODEX_FLEET_E2E_MODEL ?? "gpt-5.3-codex-spark";
+    console.warn(`Running paid Codex E2E preflight with model ${model}`);
+    const output = await runCodexPreflight(model);
+    expect(output).toContain("codex-fleet-preflight-ok");
+  });
+
   it("runs a minimal shell research task through the daemon", async () => {
     const model = process.env.CODEX_FLEET_E2E_MODEL ?? "gpt-5.3-codex-spark";
     console.warn(`Running paid Codex E2E with model ${model}`);
 
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-e2e-"));
     const paths = resolveFleetPaths(root);
-    const previousBackend = process.env.CODEX_FLEET_WORKER_BACKEND;
-    process.env.CODEX_FLEET_WORKER_BACKEND = "codex";
-    process.env.CODEX_FLEET_CODEX_TIMEOUT_MS = process.env.CODEX_FLEET_CODEX_TIMEOUT_MS ?? "120000";
-    process.env.CODEX_FLEET_E2E_MODEL = model;
+    const restoreEnv = useCodexBackend(model);
 
     const daemon = await startDaemon(paths);
     const client = createClient(paths, "orch", "orchestrator");
@@ -39,21 +44,112 @@ describeCodex("real codex e2e", () => {
       expect(task.task.state).toBe("exited");
       expect(task.task.finalResponsePreview).toContain("codex-fleet-e2e-ok");
     } finally {
-      if (previousBackend === undefined) {
-        delete process.env.CODEX_FLEET_WORKER_BACKEND;
-      } else {
-        process.env.CODEX_FLEET_WORKER_BACKEND = previousBackend;
-      }
+      restoreEnv();
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("patches a tiny repo in an isolated worktree without touching the base checkout", async () => {
+    const model = process.env.CODEX_FLEET_E2E_MODEL ?? "gpt-5.3-codex-spark";
+    console.warn(`Running paid Codex repo E2E with model ${model}`);
+
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-e2e-repo-"));
+    const repo = join(root, "base-repo");
+    initRepo(repo);
+    const paths = resolveFleetPaths(join(root, "fleet"));
+    mkdirSync(paths.rootDir, { recursive: true });
+    writeFileSync(
+      paths.reposPath,
+      `${JSON.stringify({
+        repos: [{ alias: "fixture", baseCheckout: repo, defaultBranch: "main" }]
+      })}\n`
+    );
+    const restoreEnv = useCodexBackend(model);
+    const daemon = await startDaemon(paths);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { repo: "fixture" },
+        deliveryMode: "patch",
+        modelTier: "cheap",
+        prompt:
+          "In this repo, replace README.md content with exactly '# codex-fleet-repo-e2e-ok\\n'. Do not edit any other file."
+      })) as { taskId: string };
+      const task = await waitForExit(rpc, delegated.taskId);
+      expect(task.task.state).toBe("exited");
+      expect(task.task.worktreePath).toBeTruthy();
+      expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("# fixture\n");
+      expect(readFileSync(join(task.task.worktreePath ?? "", "README.md"), "utf8")).toBe(
+        "# codex-fleet-repo-e2e-ok\n"
+      );
+    } finally {
+      restoreEnv();
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });
     }
   });
 });
 
+async function runCodexPreflight(model: string): Promise<string> {
+  const proc = Bun.spawn(
+    [
+      "codex",
+      "exec",
+      "--ephemeral",
+      "--skip-git-repo-check",
+      "-m",
+      model,
+      "Reply exactly: codex-fleet-preflight-ok"
+    ],
+    {
+      cwd: tmpdir(),
+      stderr: "pipe",
+      stdout: "pipe"
+    }
+  );
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited
+  ]);
+  if (exitCode !== 0) {
+    throw new Error(`Codex preflight failed for model ${model}: ${stderr}`);
+  }
+  return stdout;
+}
+
+function useCodexBackend(model: string): () => void {
+  const previousBackend = process.env.CODEX_FLEET_WORKER_BACKEND;
+  const previousTimeout = process.env.CODEX_FLEET_CODEX_TIMEOUT_MS;
+  const previousModel = process.env.CODEX_FLEET_E2E_MODEL;
+  process.env.CODEX_FLEET_WORKER_BACKEND = "codex";
+  process.env.CODEX_FLEET_CODEX_TIMEOUT_MS = previousTimeout ?? "120000";
+  process.env.CODEX_FLEET_E2E_MODEL = model;
+
+  return () => {
+    restoreEnv("CODEX_FLEET_WORKER_BACKEND", previousBackend);
+    restoreEnv("CODEX_FLEET_CODEX_TIMEOUT_MS", previousTimeout);
+    restoreEnv("CODEX_FLEET_E2E_MODEL", previousModel);
+  };
+}
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}
+
 async function waitForExit(
   rpc: { socketPath: string; clientId: string; token: string },
   taskId: string
-): Promise<{ task: { state: string; finalResponsePreview?: string } }> {
+): Promise<{
+  task: { state: string; finalResponsePreview?: string; worktreePath?: string };
+}> {
   let sinceEventSeq = 1;
   for (let attempt = 0; attempt < 12; attempt += 1) {
     const waited = (await callDaemon(rpc, "wait_tasks", {
@@ -61,7 +157,7 @@ async function waitForExit(
       sinceEventSeq,
       maxWaitSeconds: 10
     })) as {
-      snapshots: Array<{ state: string; finalResponsePreview?: string }>;
+      snapshots: Array<{ state: string; finalResponsePreview?: string; worktreePath?: string }>;
       events: Array<{ seq: number }>;
     };
     sinceEventSeq = Math.max(sinceEventSeq, ...waited.events.map((event) => event.seq));
@@ -71,6 +167,25 @@ async function waitForExit(
     }
   }
   return (await callDaemon(rpc, "get_task", { taskId })) as {
-    task: { state: string; finalResponsePreview?: string };
+    task: { state: string; finalResponsePreview?: string; worktreePath?: string };
   };
+}
+
+function initRepo(path: string): void {
+  execFileSync("git", ["init", "-b", "main", path], { stdio: "ignore" });
+  writeFileSync(join(path, "README.md"), "# fixture\n");
+  execFileSync("git", ["add", "README.md"], { cwd: path, stdio: "ignore" });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=Codex Fleet Test",
+      "-c",
+      "user.email=fleet@example.test",
+      "commit",
+      "-m",
+      "init"
+    ],
+    { cwd: path, stdio: "ignore" }
+  );
 }

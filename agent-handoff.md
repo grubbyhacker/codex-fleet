@@ -126,3 +126,16 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Continue final v1 gap pass, especially sparse E2E coverage shape and any remaining operational edge cases.
+
+## 2026-06-18 Sparse E2E Coverage Shape
+
+### Did
+
+- Added fake in-flight adapter restart coverage proving daemon state survives adapter replacement.
+- Expanded opt-in real-Codex E2E with model preflight and a tiny repo-patch worktree scenario.
+- Kept normal `mise exec -- bun run check` non-paid; real Codex E2E remains skipped unless explicitly enabled.
+- Verified focused adapter/E2E-skipped tests and aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Final pass for any remaining v1 gaps; paid Codex E2E has not been run in this slice.
