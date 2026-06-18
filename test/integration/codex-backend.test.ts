@@ -134,6 +134,28 @@ describe("codex worker backend", () => {
     );
   });
 
+  it("warns workers to avoid whole-file rewrites for large artifacts", () => {
+    const args = codexWorkerToolArguments(
+      {
+        taskId: "task-large-artifact",
+        branch: "fleet/fixture/task-large-artifact",
+        worktreePath: "/tmp/codex-fleet-worker",
+        request: {
+          target: { repo: "fixture" },
+          deliveryMode: "full_delivery",
+          risk: "standard",
+          prompt: "Update a large dashboard JSON file"
+        }
+      },
+      "/tmp/codex-fleet-worker"
+    );
+
+    expect(args["developer-instructions"]).toContain("Large artifact/context guardrail");
+    expect(args["developer-instructions"]).toContain("avoid loading or emitting whole files");
+    expect(args["developer-instructions"]).toContain("Use structured tools such as jq");
+    expect(args["developer-instructions"]).toContain("split into smaller tasks");
+  });
+
   it("marks codex backend error payloads as failed worker results", () => {
     const content = JSON.stringify(
       {

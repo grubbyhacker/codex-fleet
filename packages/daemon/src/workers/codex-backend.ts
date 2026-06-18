@@ -153,11 +153,20 @@ function workerInstructions(input: WorkerInput): string {
     `Task id: ${input.taskId}`,
     input.branch ? `Branch: ${input.branch}` : undefined,
     workspace,
+    largeArtifactInstructions(),
     deliveryModeInstructions(input),
     "Keep responses concise and report concrete paths and commands."
   ]
     .filter((line): line is string => Boolean(line))
     .join("\n");
+}
+
+function largeArtifactInstructions(): string {
+  return [
+    "Large artifact/context guardrail: for generated dashboards, lockfiles, vendored data, snapshots, or other large files, avoid loading or emitting whole files when a targeted edit will work.",
+    "Use structured tools such as jq, formatters, or small scripts to make narrow changes; inspect focused slices and verify with targeted checks.",
+    "If the task requires both broad investigation and a large rewrite, do the smallest safe edit or stop and report that the work should be split into smaller tasks."
+  ].join(" ");
 }
 
 function deliveryModeInstructions(input: WorkerInput): string {

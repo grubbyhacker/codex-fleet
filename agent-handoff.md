@@ -385,3 +385,16 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Replace raw ANSI styling with native OpenTUI styling before re-enabling color in the live dashboard.
+
+## 2026-06-18 Large Artifact Worker Guardrail
+
+### Did
+
+- Added worker developer instructions to avoid loading or emitting whole generated dashboards, lockfiles, snapshots, vendored data, or other large files when a targeted edit will work.
+- Directed workers toward structured tools such as `jq`, formatters, or small scripts and to split broad investigation plus large rewrites into smaller tasks.
+- Added Codex backend regression coverage for the large-artifact instruction.
+- Rebuilt/installed standalone binaries, waited for active task `4bcaf406` to exit successfully, then restarted the LaunchAgent daemon.
+
+### Next
+
+- If context-window failures continue, consider daemon-side prompt linting for obvious large-artifact rewrite requests.
