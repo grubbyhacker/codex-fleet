@@ -339,3 +339,17 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Consider a dedicated PR/check workflow wait primitive so orchestrators do not need workers to block while watching CI/deploys.
+
+## 2026-06-18 Shell Shared-Checkout Guardrail
+
+### Did
+
+- Tightened shell worker instructions to treat local shared checkouts as read-only because shell tasks do not get isolated repo worktrees.
+- Shell workers are now told not to run shared-checkout `git checkout/switch/add/commit/push` or edit files there; repo mutations should be delegated to repo targets.
+- Split shell delivery-mode instructions away from repo delivery-mode instructions so shell `full_delivery`/`push_to_main` no longer inherits commit/push semantics.
+- Added Codex backend regression coverage for shell `full_delivery` and shell `push_to_main` guardrails.
+- Rebuilt/installed standalone binaries, restarted the LaunchAgent daemon, and verified aggregate `mise exec -- bun run check`.
+
+### Next
+
+- If prompt-only guidance is not enough, add daemon-side policy to reject shell `push_to_main` and possibly shell repo-mutation prompts.

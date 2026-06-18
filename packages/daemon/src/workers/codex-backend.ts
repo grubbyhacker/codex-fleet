@@ -147,7 +147,7 @@ function workerInstructions(input: WorkerInput): string {
     ? `You're in a fresh git worktree at ${input.worktreePath}. Before working, make the environment ready per AGENTS.md; if a tool reports "not trusted," trust it for this path.`
     : input.repoBaseCheckout
       ? `You are doing read-only repo research in the registered base checkout at ${input.repoBaseCheckout}. Do not modify files, create branches, or change git state.`
-      : "You are running as a Codex Fleet shell worker with host access and no repo worktree.";
+      : "You are running as a Codex Fleet shell worker with host access and no isolated repo worktree. Treat local shared checkouts as read-only: do not run git checkout/switch/add/commit/push there and do not edit files in those repos. If the task requires repo mutation, report that it should be delegated to a repo target so Fleet can create an isolated worktree.";
   return [
     "You are a task-scoped worker agent in a local Codex Fleet.",
     `Task id: ${input.taskId}`,
@@ -161,6 +161,9 @@ function workerInstructions(input: WorkerInput): string {
 }
 
 function deliveryModeInstructions(input: WorkerInput): string {
+  if ("shell" in input.request.target) {
+    return shellDeliveryModeInstructions(input);
+  }
   switch (input.request.deliveryMode) {
     case "research_only":
       return "Delivery mode research_only: return findings only. Do not modify files, create commits, push branches, or open PRs.";
@@ -172,6 +175,21 @@ function deliveryModeInstructions(input: WorkerInput): string {
       return "Delivery mode full_delivery: implement, verify, commit, push, open a PR if repo norms require it, and carry through merge only when the prompt and repo norms allow.";
     case "push_to_main":
       return "Delivery mode push_to_main: implement, verify, commit, and push directly to the repo default branch when that is the requested repo norm.";
+  }
+}
+
+function shellDeliveryModeInstructions(input: WorkerInput): string {
+  switch (input.request.deliveryMode) {
+    case "research_only":
+      return "Delivery mode research_only on shell: return findings only. Shell targets are for read-only checks, deploy observation, and host diagnostics; do not modify shared repo checkouts or git state.";
+    case "patch":
+      return "Delivery mode patch on shell: do not patch shared repo checkouts. If a code change is required, stop and report that the work should be rerun as a repo target. Host-local non-repo changes are allowed only when explicitly requested.";
+    case "pr_for_review":
+      return "Delivery mode pr_for_review on shell: shell has no isolated worktree, so do not stage, commit, push, or open a PR from a shared checkout. Report that repo changes must be delegated to a repo target.";
+    case "full_delivery":
+      return "Delivery mode full_delivery on shell: carry out explicitly requested host ops or deploy steps, but do not mutate shared repo checkouts or perform git commits/pushes. If source changes are needed, report that a repo target is required.";
+    case "push_to_main":
+      return "Delivery mode push_to_main on shell: refused for shared checkouts. Do not commit or push from shell; report that direct repo mutation must use a repo target with an isolated worktree.";
   }
 }
 

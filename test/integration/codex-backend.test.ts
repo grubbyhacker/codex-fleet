@@ -67,6 +67,46 @@ describe("codex worker backend", () => {
     });
   });
 
+  it("warns shell workers away from mutating shared repo checkouts", () => {
+    const args = codexWorkerToolArguments(
+      {
+        taskId: "task-shell",
+        request: {
+          target: { shell: true },
+          deliveryMode: "full_delivery",
+          risk: "standard",
+          prompt: "Deploy the current service"
+        }
+      },
+      "/Users/roger/src/agent-infra/vps-ops"
+    );
+
+    expect(args["developer-instructions"]).toContain("no isolated repo worktree");
+    expect(args["developer-instructions"]).toContain("Treat local shared checkouts as read-only");
+    expect(args["developer-instructions"]).toContain("do not mutate shared repo checkouts");
+    expect(args["developer-instructions"]).toContain("repo target is required");
+    expect(args["developer-instructions"]).not.toContain("commit, push, open a PR");
+  });
+
+  it("refuses push-to-main semantics for shell workers", () => {
+    const args = codexWorkerToolArguments(
+      {
+        taskId: "task-shell-main",
+        request: {
+          target: { shell: true },
+          deliveryMode: "push_to_main",
+          risk: "standard",
+          prompt: "Commit and push directly"
+        }
+      },
+      "/Users/roger/src/agent-infra/vps-ops"
+    );
+
+    expect(args["developer-instructions"]).toContain("Delivery mode push_to_main on shell");
+    expect(args["developer-instructions"]).toContain("Do not commit or push from shell");
+    expect(args["developer-instructions"]).toContain("isolated worktree");
+  });
+
   it("tells review workers to commit, push, and open a PR", () => {
     const args = codexWorkerToolArguments(
       {
