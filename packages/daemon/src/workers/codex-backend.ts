@@ -105,10 +105,26 @@ function workerInstructions(input: WorkerInput): string {
     `Task id: ${input.taskId}`,
     input.branch ? `Branch: ${input.branch}` : undefined,
     workspace,
+    deliveryModeInstructions(input),
     "Keep responses concise and report concrete paths and commands."
   ]
     .filter((line): line is string => Boolean(line))
     .join("\n");
+}
+
+function deliveryModeInstructions(input: WorkerInput): string {
+  switch (input.request.deliveryMode) {
+    case "research_only":
+      return "Delivery mode research_only: return findings only. Do not modify files, create commits, push branches, or open PRs.";
+    case "patch":
+      return "Delivery mode patch: implement and verify locally, then hand back the diff/status. Do not push or open a PR.";
+    case "pr_for_review":
+      return "Delivery mode pr_for_review: implement, verify, stage only intended changes, commit them on the task branch, push the branch, open a PR, and stop before merge. Do not leave intended review changes only as untracked or uncommitted files; if blocked, report the exact git status and blocker.";
+    case "full_delivery":
+      return "Delivery mode full_delivery: implement, verify, commit, push, open a PR if repo norms require it, and carry through merge only when the prompt and repo norms allow.";
+    case "push_to_main":
+      return "Delivery mode push_to_main: implement, verify, commit, and push directly to the repo default branch when that is the requested repo norm.";
+  }
 }
 
 function parseCodexResult(result: unknown): CodexToolResult {

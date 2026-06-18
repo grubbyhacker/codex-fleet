@@ -63,6 +63,30 @@ describe("codex worker backend", () => {
       "approval-policy": "never"
     });
   });
+
+  it("tells review workers to commit, push, and open a PR", () => {
+    const args = codexWorkerToolArguments(
+      {
+        taskId: "task-2",
+        branch: "fleet/fixture/task-2",
+        worktreePath: "/tmp/codex-fleet-worker",
+        request: {
+          target: { repo: "fixture" },
+          deliveryMode: "pr_for_review",
+          risk: "standard",
+          prompt: "Implement a docs update"
+        }
+      },
+      "/tmp/codex-fleet-worker"
+    );
+
+    expect(args["developer-instructions"]).toContain(
+      "stage only intended changes, commit them on the task branch, push the branch, open a PR"
+    );
+    expect(args["developer-instructions"]).toContain(
+      "Do not leave intended review changes only as untracked or uncommitted files"
+    );
+  });
 });
 
 function restoreEnv(key: string, value: string | undefined): void {

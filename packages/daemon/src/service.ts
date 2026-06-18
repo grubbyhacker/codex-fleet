@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
 import {
   delegateTaskRequestSchema,
@@ -9,6 +11,7 @@ import {
   listTasksRequestSchema,
   methodParamsSchemas,
   waitTasksRequestSchema,
+  type DeliveryMode,
   type DaemonMethod,
   type Event,
   type ModelTier,
@@ -28,6 +31,20 @@ import { FleetState, type TaskCreatedPayload, type TaskStatePayload } from "./st
 import type { WorkerBackend } from "./workers/backend.js";
 import { workerBackendFromEnv } from "./workers/codex-backend.js";
 import { WorktreeManager } from "./worktree/worktree-manager.js";
+
+type WorktreePostRunStatus = {
+  worktreePath: string;
+  branch?: string;
+  baseBranch?: string;
+  dirtyFiles?: number;
+  stagedFiles?: number;
+  unstagedFiles?: number;
+  untrackedFiles?: number;
+  aheadOfBase?: number;
+  behindBase?: number;
+  attention: string[];
+  inspectionError?: string;
+};
 
 export class FleetService {
   private readonly eventLog: EventLog;
@@ -218,11 +235,16 @@ export class FleetService {
   private async runWorker(input: Parameters<WorkerBackend["run"]>[0]): Promise<void> {
     try {
       const result = await this.workerBackend.run(input);
+      const worktreeStatus = this.inspectWorktreeAfterRun(input);
+      if (worktreeStatus) {
+        this.append("worktree_status", input.taskId, worktreeStatus);
+      }
+      const finalResponse = appendFleetPostCheck(result.finalResponse, worktreeStatus?.attention);
       this.append("task_state", input.taskId, {
         state: "exited",
         exitCode: result.exitCode,
-        finalResponse: result.finalResponse,
-        finalResponsePreview: result.finalResponsePreview,
+        finalResponse,
+        finalResponsePreview: preview(finalResponse, 500),
         codexThreadId: result.codexThreadId,
         lastActivityAt: new Date().toISOString()
       } satisfies TaskStatePayload);
@@ -233,6 +255,68 @@ export class FleetService {
           error instanceof Error ? preview(error.message) : preview(String(error)),
         lastActivityAt: new Date().toISOString()
       } satisfies TaskStatePayload);
+    }
+  }
+
+  private inspectWorktreeAfterRun(
+    input: Parameters<WorkerBackend["run"]>[0]
+  ): WorktreePostRunStatus | undefined {
+    if (!input.worktreePath || !("repo" in input.request.target)) {
+      return undefined;
+    }
+
+    const repo = this.registry.get(input.request.target.repo);
+    const baseBranch = repo?.defaultBranch;
+    const status: WorktreePostRunStatus = {
+      worktreePath: input.worktreePath,
+      branch: input.branch,
+      baseBranch,
+      attention: []
+    };
+
+    if (!existsSync(input.worktreePath)) {
+      return {
+        ...status,
+        inspectionError: "worktree_missing",
+        attention: [`Fleet post-check: worktree is missing at ${input.worktreePath}.`]
+      };
+    }
+
+    try {
+      const lines = gitOutput(input.worktreePath, ["status", "--porcelain"])
+        .split("\n")
+        .filter(Boolean);
+      const stagedFiles = lines.filter((line) => line[0] !== " " && line[0] !== "?").length;
+      const unstagedFiles = lines.filter((line) => line[1] !== " " && line[1] !== "?").length;
+      const untrackedFiles = lines.filter((line) => line.startsWith("??")).length;
+      Object.assign(status, {
+        dirtyFiles: lines.length,
+        stagedFiles,
+        unstagedFiles,
+        untrackedFiles
+      });
+
+      if (baseBranch) {
+        const [behind, ahead] = gitOutput(input.worktreePath, [
+          "rev-list",
+          "--left-right",
+          "--count",
+          `${baseBranch}...HEAD`
+        ])
+          .split(/\s+/)
+          .map((value) => Number.parseInt(value, 10));
+        status.behindBase = Number.isFinite(behind) ? behind : undefined;
+        status.aheadOfBase = Number.isFinite(ahead) ? ahead : undefined;
+      }
+
+      status.attention = worktreeAttention(input.request.deliveryMode, status);
+      return status;
+    } catch (error) {
+      return {
+        ...status,
+        inspectionError: error instanceof Error ? error.message : String(error),
+        attention: ["Fleet post-check: could not inspect the task worktree git status."]
+      };
     }
   }
 
@@ -317,6 +401,45 @@ export class FleetService {
 
 function preview(value: string, maxLength = 240): string {
   return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
+}
+
+function gitOutput(cwd: string, args: string[]): string {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  }).trim();
+}
+
+function worktreeAttention(deliveryMode: DeliveryMode, status: WorktreePostRunStatus): string[] {
+  if (
+    deliveryMode !== "pr_for_review" &&
+    deliveryMode !== "full_delivery" &&
+    deliveryMode !== "push_to_main"
+  ) {
+    return [];
+  }
+
+  const attention: string[] = [];
+  if ((status.dirtyFiles ?? 0) > 0) {
+    attention.push(
+      `Fleet post-check: worktree has ${status.dirtyFiles} uncommitted file(s) after ${deliveryMode}.`
+    );
+  }
+  if (status.aheadOfBase === 0) {
+    attention.push(
+      `Fleet post-check: branch has no commits ahead of ${status.baseBranch ?? "the base branch"}.`
+    );
+  }
+  return attention;
+}
+
+function appendFleetPostCheck(response: string, attention: string[] | undefined): string {
+  if (!attention?.length) {
+    return response;
+  }
+  const note = attention.join("\n");
+  return response.length > 0 ? `${response}\n\n${note}` : note;
 }
 
 function routeModelTier(

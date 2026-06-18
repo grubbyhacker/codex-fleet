@@ -216,3 +216,13 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 - Rebuilt and installed standalone binaries, then restarted the LaunchAgent daemon.
 - Verified a live `research_only` shell worker can resolve `/opt/homebrew/bin/gh`, run `gh auth status` successfully, and create a temp file under `/tmp`.
 - Verified aggregate `mise exec -- bun run check`.
+
+## 2026-06-18 Review Task Post-Checks
+
+### Did
+
+- Tightened Codex worker delivery-mode instructions so `pr_for_review` explicitly stages intended changes, commits, pushes, opens a PR, and stops before merge.
+- Added daemon post-run git inspection for repo worktrees and a `worktree_status` event with dirty-file counts and ahead/behind counts versus the repo default branch.
+- Annotated final task responses when `pr_for_review`/`full_delivery`/`push_to_main` exits with uncommitted files or no commits ahead of the base branch.
+- Added regression coverage for a review task that writes an untracked file and exits without committing.
+- Rebuilt/installed standalone binaries, restarted the LaunchAgent daemon, and verified aggregate `mise exec -- bun run check`.

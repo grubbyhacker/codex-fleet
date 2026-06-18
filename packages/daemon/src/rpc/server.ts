@@ -5,6 +5,7 @@ import { rpcEnvelopeSchema, type DaemonResponse } from "@codex-fleet/shared";
 
 import type { FleetPaths } from "../paths.js";
 import { FleetService } from "../service.js";
+import type { WorkerBackend } from "../workers/backend.js";
 import { appendAuditRecord } from "./audit.js";
 import { authenticate, authorize, ensureStateLayout } from "./auth.js";
 import { errorResponse } from "./errors.js";
@@ -14,7 +15,10 @@ export type RunningDaemon = {
   socketPath: string;
 };
 
-export async function startDaemon(paths: FleetPaths): Promise<RunningDaemon> {
+export async function startDaemon(
+  paths: FleetPaths,
+  workerBackend?: WorkerBackend
+): Promise<RunningDaemon> {
   assertNotRoot();
   ensureStateLayout(paths);
   verifyStateLayout(paths);
@@ -22,7 +26,7 @@ export async function startDaemon(paths: FleetPaths): Promise<RunningDaemon> {
     await removeStaleSocket(paths.socketPath);
   }
 
-  const service = new FleetService(paths);
+  const service = new FleetService(paths, workerBackend);
   const server = net.createServer((socket) => {
     let buffer = "";
     socket.setEncoding("utf8");

@@ -9,6 +9,7 @@ import { resolveFleetPaths } from "../../packages/daemon/src/paths.js";
 import { createClient } from "../../packages/daemon/src/rpc/auth.js";
 import { callDaemon } from "../../packages/daemon/src/rpc/client.js";
 import { startDaemon } from "../../packages/daemon/src/rpc/server.js";
+import type { WorkerBackend } from "../../packages/daemon/src/workers/backend.js";
 
 describe("repo registry and worktree isolation", () => {
   it("creates distinct worktrees and branches for parallel repo tasks", async () => {
@@ -74,7 +75,99 @@ describe("repo registry and worktree isolation", () => {
       rmSync(root, { force: true, recursive: true });
     }
   });
+
+  it("reports review tasks that leave uncommitted files and empty branches", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-worktree-postcheck-"));
+    const repo = join(root, "base-repo");
+    initRepo(repo);
+
+    const paths = resolveFleetPaths(join(root, "fleet"));
+    writeRepoRegistry(paths.rootDir, paths.reposPath, repo);
+
+    const backend: WorkerBackend = {
+      run(input) {
+        writeFileSync(join(input.worktreePath ?? "", "REVIEW.md"), "draft review notes\n");
+        return {
+          exitCode: 0,
+          finalResponse: "worker says done",
+          finalResponsePreview: "worker says done",
+          codexThreadId: `fake-thread-${input.taskId}`
+        };
+      }
+    };
+    const daemon = await startDaemon(paths, backend);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { repo: "fixture" },
+        deliveryMode: "pr_for_review",
+        prompt: "write a review doc"
+      })) as { taskId: string };
+
+      const task = await waitUntilExited(rpc, delegated.taskId);
+      expect(task.task.finalResponse).toContain("worker says done");
+      expect(task.task.finalResponse).toContain("worktree has 1 uncommitted file(s)");
+      expect(task.task.finalResponse).toContain("branch has no commits ahead of main");
+
+      const history = (await callDaemon(rpc, "get_task_history", {
+        taskId: delegated.taskId
+      })) as { events: Array<{ type: string; summary: string }> };
+      const worktreeStatus = history.events.find((event) => event.type === "worktree_status");
+      expect(worktreeStatus).toBeTruthy();
+      expect(JSON.parse(worktreeStatus?.summary ?? "{}")).toMatchObject({
+        dirtyFiles: 1,
+        untrackedFiles: 1,
+        aheadOfBase: 0,
+        attention: [
+          "Fleet post-check: worktree has 1 uncommitted file(s) after pr_for_review.",
+          "Fleet post-check: branch has no commits ahead of main."
+        ]
+      });
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
 });
+
+async function waitUntilExited(
+  rpc: { socketPath: string; clientId: string; token: string },
+  taskId: string
+): Promise<{ task: { state: string; finalResponse?: string } }> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const result = (await callDaemon(rpc, "get_task", { taskId })) as {
+      task: { state: string; finalResponse?: string };
+    };
+    if (result.task.state === "exited") {
+      return result;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return (await callDaemon(rpc, "get_task", { taskId })) as {
+    task: { state: string; finalResponse?: string };
+  };
+}
+
+function writeRepoRegistry(rootDir: string, reposPath: string, repo: string): void {
+  mkdirSync(rootDir, { recursive: true });
+  writeFileSync(
+    reposPath,
+    `${JSON.stringify({
+      repos: [
+        {
+          alias: "fixture",
+          baseCheckout: repo,
+          defaultBranch: "main",
+          branchProtected: true,
+          verifyCommands: ["bun test"],
+          defaultModelTier: "standard"
+        }
+      ]
+    })}\n`
+  );
+}
 
 function initRepo(path: string): void {
   execFileSync("git", ["init", "-b", "main", path], { stdio: "ignore" });
