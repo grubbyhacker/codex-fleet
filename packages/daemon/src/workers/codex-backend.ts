@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -12,7 +14,7 @@ export class CodexWorkerBackend implements WorkerBackend {
   async run(input: WorkerInput): Promise<WorkerResult> {
     const cwd = input.worktreePath ?? process.cwd();
     const transport = new StdioClientTransport({
-      command: process.env.CODEX_FLEET_CODEX_COMMAND ?? "codex",
+      command: resolveCodexCommand(),
       args: ["mcp-server"],
       cwd,
       stderr: "pipe"
@@ -57,6 +59,28 @@ export class CodexWorkerBackend implements WorkerBackend {
       await client.close().catch(() => undefined);
     }
   }
+}
+
+export function resolveCodexCommand(candidates = defaultCodexCommandCandidates()): string {
+  const configured = process.env.CODEX_FLEET_CODEX_COMMAND;
+  if (configured) {
+    return configured;
+  }
+
+  for (const candidate of candidates) {
+    if (candidate && existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return "codex";
+}
+
+function defaultCodexCommandCandidates(): string[] {
+  return [
+    "/Applications/Codex.app/Contents/Resources/codex",
+    `${process.env.HOME ?? ""}/.local/bin/codex`
+  ];
 }
 
 export function workerBackendFromEnv(): WorkerBackend {
