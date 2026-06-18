@@ -17,7 +17,12 @@ export interface WorkerBackend {
 }
 
 export class FakeWorkerBackend implements WorkerBackend {
-  run(input: WorkerInput): WorkerResult {
+  async run(input: WorkerInput): Promise<WorkerResult> {
+    const delayMs = Number(process.env.CODEX_FLEET_FAKE_WORKER_DELAY_MS ?? "0");
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+
     const target = "repo" in input.request.target ? `repo ${input.request.target.repo}` : "shell";
     return {
       exitCode: 0,

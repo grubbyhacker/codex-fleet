@@ -148,15 +148,28 @@ export class FleetService {
       state: "running",
       lastActivityAt: createdAt
     } satisfies TaskStatePayload);
-    const result = await this.workerBackend.run({ taskId, request, branch, worktreePath });
-    this.append("task_state", taskId, {
-      state: "exited",
-      exitCode: result.exitCode,
-      finalResponsePreview: result.finalResponsePreview,
-      lastActivityAt: new Date().toISOString()
-    } satisfies TaskStatePayload);
+    void this.runWorker({ taskId, request, branch, worktreePath });
 
     return { taskId };
+  }
+
+  private async runWorker(input: Parameters<WorkerBackend["run"]>[0]): Promise<void> {
+    try {
+      const result = await this.workerBackend.run(input);
+      this.append("task_state", input.taskId, {
+        state: "exited",
+        exitCode: result.exitCode,
+        finalResponsePreview: result.finalResponsePreview,
+        lastActivityAt: new Date().toISOString()
+      } satisfies TaskStatePayload);
+    } catch (error) {
+      this.append("task_state", input.taskId, {
+        state: "failed_to_start",
+        finalResponsePreview:
+          error instanceof Error ? preview(error.message) : preview(String(error)),
+        lastActivityAt: new Date().toISOString()
+      } satisfies TaskStatePayload);
+    }
   }
 
   private async waitTasks(

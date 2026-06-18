@@ -76,4 +76,46 @@ describe("daemon rpc", () => {
       rmSync(root, { force: true, recursive: true });
     }
   });
+
+  it("returns from delegate_task before delayed worker completion", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-rpc-async-"));
+    const paths = resolveFleetPaths(root);
+    const previousDelay = process.env.CODEX_FLEET_FAKE_WORKER_DELAY_MS;
+    process.env.CODEX_FLEET_FAKE_WORKER_DELAY_MS = "250";
+    const daemon = await startDaemon(paths);
+    const orchestrator = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: orchestrator.token };
+
+    try {
+      const startedAt = performance.now();
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "delayed fake worker"
+      })) as { taskId: string };
+      const elapsed = performance.now() - startedAt;
+      expect(elapsed).toBeLessThan(200);
+
+      const running = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
+        task: { state: string };
+      };
+      expect(running.task.state).toBe("running");
+
+      const waited = (await callDaemon(rpc, "wait_tasks", {
+        taskIds: [delegated.taskId],
+        sinceEventSeq: 1,
+        maxWaitSeconds: 1
+      })) as { snapshots: Array<{ state: string }>; events: Array<{ type: string }> };
+      expect(waited.snapshots[0]?.state).toBe("exited");
+      expect(waited.events).toContainEqual(expect.objectContaining({ type: "task_state" }));
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.CODEX_FLEET_FAKE_WORKER_DELAY_MS;
+      } else {
+        process.env.CODEX_FLEET_FAKE_WORKER_DELAY_MS = previousDelay;
+      }
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
 });

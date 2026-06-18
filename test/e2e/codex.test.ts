@@ -35,9 +35,7 @@ describeCodex("real codex e2e", () => {
         modelTier: "cheap",
         prompt: "Reply with exactly: codex-fleet-e2e-ok"
       })) as { taskId: string };
-      const task = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
-        task: { state: string; finalResponsePreview?: string };
-      };
+      const task = await waitForExit(rpc, delegated.taskId);
       expect(task.task.state).toBe("exited");
       expect(task.task.finalResponsePreview).toContain("codex-fleet-e2e-ok");
     } finally {
@@ -51,3 +49,28 @@ describeCodex("real codex e2e", () => {
     }
   });
 });
+
+async function waitForExit(
+  rpc: { socketPath: string; clientId: string; token: string },
+  taskId: string
+): Promise<{ task: { state: string; finalResponsePreview?: string } }> {
+  let sinceEventSeq = 1;
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const waited = (await callDaemon(rpc, "wait_tasks", {
+      taskIds: [taskId],
+      sinceEventSeq,
+      maxWaitSeconds: 10
+    })) as {
+      snapshots: Array<{ state: string; finalResponsePreview?: string }>;
+      events: Array<{ seq: number }>;
+    };
+    sinceEventSeq = Math.max(sinceEventSeq, ...waited.events.map((event) => event.seq));
+    const snapshot = waited.snapshots[0];
+    if (snapshot?.state === "exited") {
+      return { task: snapshot };
+    }
+  }
+  return (await callDaemon(rpc, "get_task", { taskId })) as {
+    task: { state: string; finalResponsePreview?: string };
+  };
+}

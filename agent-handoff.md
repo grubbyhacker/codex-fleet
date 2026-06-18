@@ -45,3 +45,16 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 - Added opt-in real Codex worker backend and `test:e2e:codex`; normal checks skip paid E2E.
 - Added model-tier routing records for requested vs actual tier with safe upgrades.
 - Created logical commits for each verified slice.
+
+## 2026-06-18 Async Worker Lifecycle
+
+### Did
+
+- Changed `delegate_task` to return `{taskId}` after recording task creation/running state, then complete the Worker in the background.
+- Added deterministic fake-worker delay coverage proving `delegate_task` does not wait for Worker completion.
+- Updated the opt-in Codex E2E path to observe completion through `wait_tasks`.
+- Verified focused RPC/E2E tests and aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Continue v1 gaps from the plan: richer operator cleanup CLI, TUI observability, and hardening/service install.
