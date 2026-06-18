@@ -175,3 +175,20 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Final status pass and close v1 if no remaining plan/design gaps require implementation.
+
+## 2026-06-18 Productionization Rollout
+
+### Did
+
+- Added `build:bin` and `install:bin` scripts that compile and install `codex-fleet`, `codex-fleet-daemon`, `codex-fleet-mcp`, and `codex-fleet-tui`.
+- Updated LaunchAgent generation and commands so launchd runs `~/.local/bin/codex-fleet-daemon run` with the Codex worker environment.
+- Installed binaries to `~/.local/bin`, restarted the LaunchAgent, and verified launchd reports `state = running` with the standalone daemon path.
+- Wrote `~/.codex-fleet/repos.json` for `vps-ops`, `youknowme`, `gh-agent-broker`, and `ykmcorpus`.
+- Migrated Codex Desktop and Claude/Cowork MCP configs so official `codex-fleet` uses `~/.local/bin/codex-fleet-mcp`; preserved the POC as `codex-fleet-poc`.
+- Fixed repo `research_only` workers to run in the registered base checkout without treating that checkout as an owned cleanup worktree.
+- Smoked installed MCP as `codex` and `claudecowork`: `list_targets`, shell research, repo research, CLI/TUI visibility, logs, and cleanup dry-run all passed.
+- Verified `mise exec -- bun run check`.
+
+### Next
+
+- Use v1 for real multi-repo work; keep `codex-fleet-poc` as fallback until confidence is higher.
