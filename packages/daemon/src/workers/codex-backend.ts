@@ -50,9 +50,11 @@ export class CodexWorkerBackend implements WorkerBackend {
         { timeout: Number(process.env.CODEX_FLEET_CODEX_TIMEOUT_MS ?? "600000") }
       );
       const parsed = parseCodexResult(result);
+      const finalResponse = parsed.content ?? "";
       return {
         exitCode: 0,
-        finalResponsePreview: preview(parsed.content ?? ""),
+        finalResponse,
+        finalResponsePreview: preview(finalResponse),
         codexThreadId: parsed.threadId
       };
     } finally {

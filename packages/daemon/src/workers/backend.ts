@@ -11,6 +11,7 @@ export type WorkerInput = {
 
 export type WorkerResult = {
   exitCode: number;
+  finalResponse: string;
   finalResponsePreview: string;
   codexThreadId?: string;
 };
@@ -27,10 +28,18 @@ export class FakeWorkerBackend implements WorkerBackend {
     }
 
     const target = "repo" in input.request.target ? `repo ${input.request.target.repo}` : "shell";
+    const finalResponse =
+      process.env.CODEX_FLEET_FAKE_WORKER_RESPONSE ??
+      `fake worker accepted ${input.request.deliveryMode} task for ${target}`;
     return {
       exitCode: 0,
-      finalResponsePreview: `fake worker accepted ${input.request.deliveryMode} task for ${target}`,
+      finalResponse,
+      finalResponsePreview: preview(finalResponse),
       codexThreadId: input.codexThreadId ?? `fake-thread-${input.taskId}`
     };
   }
+}
+
+function preview(value: string, maxLength = 500): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
 }

@@ -16,6 +16,7 @@ export type TaskCreatedPayload = Omit<DelegateTaskRequest, "prompt"> & {
 export type TaskStatePayload = {
   state: TaskSnapshot["state"];
   exitCode?: number;
+  finalResponse?: string;
   finalResponsePreview?: string;
   lastActivityAt?: string;
   codexThreadId?: string;
@@ -73,6 +74,7 @@ export class FleetState {
         updatedAt: event.ts,
         state: payload.state,
         exitCode: payload.exitCode,
+        finalResponse: payload.finalResponse,
         finalResponsePreview: payload.finalResponsePreview,
         lastActivityAt: payload.lastActivityAt ?? event.ts,
         codexThreadId: payload.codexThreadId ?? existing.codexThreadId

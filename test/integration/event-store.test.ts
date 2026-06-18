@@ -34,6 +34,7 @@ describe("event log and replay", () => {
         summary: JSON.stringify({
           state: "exited",
           exitCode: 0,
+          finalResponse: "done with the full response",
           finalResponsePreview: "done"
         })
       });
@@ -43,6 +44,7 @@ describe("event log and replay", () => {
         id: "task-1",
         state: "exited",
         exitCode: 0,
+        finalResponse: "done with the full response",
         finalResponsePreview: "done"
       });
       expect(state.eventsSince(0, ["task-1"]).map((event) => event.seq)).toEqual([1]);

@@ -192,3 +192,17 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Use v1 for real multi-repo work; keep `codex-fleet-poc` as fallback until confidence is higher.
+
+## 2026-06-18 Full Task Results
+
+### Did
+
+- Fixed final-result persistence so workers return both full `finalResponse` and truncated `finalResponsePreview`.
+- Replayed/stored full final responses in daemon task state and task history events.
+- Added regression coverage proving `get_task`, `wait_tasks`, `get_task_history`, and daemon restart preserve the full response.
+- Rebuilt and restarted the installed daemon; live smoke task `12fbabb5-6284-49e9-8827-117e4f105727` returned full `finalResponse` plus shorter preview.
+- Verified aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Old tasks that were already clipped before this fix remain unrecoverable unless Codex still has their thread elsewhere.

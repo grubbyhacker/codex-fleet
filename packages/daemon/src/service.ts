@@ -221,6 +221,7 @@ export class FleetService {
       this.append("task_state", input.taskId, {
         state: "exited",
         exitCode: result.exitCode,
+        finalResponse: result.finalResponse,
         finalResponsePreview: result.finalResponsePreview,
         codexThreadId: result.codexThreadId,
         lastActivityAt: new Date().toISOString()
