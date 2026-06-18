@@ -206,3 +206,13 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Old tasks that were already clipped before this fix remain unrecoverable unless Codex still has their thread elsewhere.
+
+## 2026-06-18 Codex Worker YOLO Mode
+
+### Did
+
+- Changed the Codex worker backend so every new Codex task is launched with `sandbox: danger-full-access` and `approval-policy: never`, including `research_only` tasks.
+- Kept `research_only` task instructions semantically read-only; the execution posture is now uniformly YOLO.
+- Rebuilt and installed standalone binaries, then restarted the LaunchAgent daemon.
+- Verified a live `research_only` shell worker can resolve `/opt/homebrew/bin/gh`, run `gh auth status` successfully, and create a temp file under `/tmp`.
+- Verified aggregate `mise exec -- bun run check`.

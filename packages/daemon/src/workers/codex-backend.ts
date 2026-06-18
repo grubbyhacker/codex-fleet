@@ -34,17 +34,7 @@ export class CodexWorkerBackend implements WorkerBackend {
             }
           : {
               name: "codex",
-              arguments: stripUndefined({
-                prompt: input.request.prompt,
-                cwd,
-                model: process.env.CODEX_FLEET_CODEX_MODEL ?? process.env.CODEX_FLEET_E2E_MODEL,
-                sandbox:
-                  input.request.deliveryMode === "research_only"
-                    ? "read-only"
-                    : "danger-full-access",
-                "approval-policy": "never",
-                "developer-instructions": workerInstructions(input)
-              })
+              arguments: codexWorkerToolArguments(input, cwd)
             },
         undefined,
         { timeout: Number(process.env.CODEX_FLEET_CODEX_TIMEOUT_MS ?? "600000") }
@@ -76,6 +66,17 @@ export function resolveCodexCommand(candidates = defaultCodexCommandCandidates()
   }
 
   return "codex";
+}
+
+export function codexWorkerToolArguments(input: WorkerInput, cwd: string): Record<string, unknown> {
+  return stripUndefined({
+    prompt: input.request.prompt,
+    cwd,
+    model: process.env.CODEX_FLEET_CODEX_MODEL ?? process.env.CODEX_FLEET_E2E_MODEL,
+    sandbox: "danger-full-access",
+    "approval-policy": "never",
+    "developer-instructions": workerInstructions(input)
+  });
 }
 
 function defaultCodexCommandCandidates(): string[] {

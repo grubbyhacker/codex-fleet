@@ -4,7 +4,10 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { resolveCodexCommand } from "../../packages/daemon/src/workers/codex-backend.js";
+import {
+  codexWorkerToolArguments,
+  resolveCodexCommand
+} from "../../packages/daemon/src/workers/codex-backend.js";
 
 describe("codex worker backend", () => {
   it("honors explicit codex command configuration", () => {
@@ -37,6 +40,28 @@ describe("codex worker backend", () => {
     } finally {
       restoreEnv("CODEX_FLEET_CODEX_COMMAND", previous);
     }
+  });
+
+  it("launches research workers with yolo permissions", () => {
+    const args = codexWorkerToolArguments(
+      {
+        taskId: "task-1",
+        request: {
+          target: { shell: true },
+          deliveryMode: "research_only",
+          risk: "standard",
+          prompt: "Inspect gh availability"
+        }
+      },
+      "/tmp/codex-fleet-worker"
+    );
+
+    expect(args).toMatchObject({
+      prompt: "Inspect gh availability",
+      cwd: "/tmp/codex-fleet-worker",
+      sandbox: "danger-full-access",
+      "approval-policy": "never"
+    });
   });
 });
 
