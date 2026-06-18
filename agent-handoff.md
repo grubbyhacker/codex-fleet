@@ -324,3 +324,18 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Persist sanitized Codex event payloads if the pane should become a true Codex-console-style transcript rather than a durable daemon event/detail view.
+
+## 2026-06-18 Compact Lists And Git Cleanup
+
+### Did
+
+- Changed daemon `list_tasks` to return compact snapshots without `finalResponse*` or `workerStderr*`; `get_task` and `wait_tasks` still return retained output for specific tasks.
+- Added `list_tasks` filters for `targetId`, `updatedSince`, and bounded `limit`, with newest tasks first.
+- Updated the TUI to fetch full details only for the selected task so the activity pane still shows final response/stderr without bloating every refresh.
+- Added a daemon Git resolver for LaunchAgent-safe cleanup/worktree operations and reused it in CLI force cleanup.
+- Added regressions for compact list payloads and `end_task` cleanup with an empty `PATH`.
+- Rebuilt/installed standalone binaries, restarted the LaunchAgent daemon, and verified aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Consider a dedicated PR/check workflow wait primitive so orchestrators do not need workers to block while watching CI/deploys.

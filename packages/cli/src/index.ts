@@ -3,6 +3,7 @@ import {
   clientRoleSchema,
   createClient,
   readClientToken,
+  resolveGitExecutable,
   resolveFleetPaths,
   startDaemon
 } from "@codex-fleet/daemon";
@@ -253,11 +254,12 @@ async function forceCleanup(taskId: string): Promise<{
     throw new Error(`Task "${taskId}" is not a repo task`);
   }
   const repo = loadRepoBaseCheckout(resolveFleetPaths(), task.target.repo);
-  execFileSync("git", ["worktree", "remove", "--force", task.worktreePath], {
+  const git = resolveGitExecutable();
+  execFileSync(git, ["worktree", "remove", "--force", task.worktreePath], {
     cwd: repo.baseCheckout,
     stdio: "ignore"
   });
-  execFileSync("git", ["worktree", "prune"], { cwd: repo.baseCheckout, stdio: "ignore" });
+  execFileSync(git, ["worktree", "prune"], { cwd: repo.baseCheckout, stdio: "ignore" });
   const branchDeleted = task.branch ? deleteBranchIfMerged(repo.baseCheckout, task.branch) : false;
   return { accepted: true, taskId, cleanup: { cleaned: true, forced: true, branchDeleted } };
 }
@@ -277,7 +279,7 @@ function loadRepoBaseCheckout(
 }
 
 function dirtyFileCount(worktreePath: string): number {
-  return execFileSync("git", ["status", "--porcelain"], {
+  return execFileSync(resolveGitExecutable(), ["status", "--porcelain"], {
     cwd: worktreePath,
     encoding: "utf8"
   })
@@ -288,7 +290,10 @@ function dirtyFileCount(worktreePath: string): number {
 
 function deleteBranchIfMerged(baseCheckout: string, branch: string): boolean {
   try {
-    execFileSync("git", ["branch", "-d", branch], { cwd: baseCheckout, stdio: "ignore" });
+    execFileSync(resolveGitExecutable(), ["branch", "-d", branch], {
+      cwd: baseCheckout,
+      stdio: "ignore"
+    });
     return true;
   } catch {
     return false;

@@ -22,6 +22,7 @@ import {
 } from "@codex-fleet/shared";
 
 import { CleanupManager } from "./cleanup/cleanup-manager.js";
+import { resolveGitExecutable } from "./git.js";
 import type { FleetPaths } from "./paths.js";
 import { RepoRegistry } from "./registry/repo-registry.js";
 import type { ClientRecord } from "./rpc/auth.js";
@@ -104,10 +105,17 @@ export class FleetService {
         return this.waitTasks(envelope.clientId, waitTasksRequestSchema.parse(params), client);
       case "list_tasks": {
         const request = listTasksRequestSchema.parse(params);
-        const tasks = this.visibleTasks(envelope.clientId, client).filter(
-          (task) => !request.states || request.states.includes(task.state)
-        );
-        return { tasks };
+        const tasks = this.visibleTasks(envelope.clientId, client)
+          .filter((task) => !request.states || request.states.includes(task.state))
+          .filter((task) => !request.targetId || targetMatches(task, request.targetId))
+          .filter(
+            (task) =>
+              !request.updatedSince ||
+              Date.parse(task.updatedAt) >= Date.parse(request.updatedSince)
+          )
+          .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+          .slice(0, request.limit);
+        return { tasks: tasks.map(compactTaskSnapshot) };
       }
       case "get_task_history": {
         const request = getTaskHistoryRequestSchema.parse(params);
@@ -433,8 +441,22 @@ function preview(value: string, maxLength = 240): string {
   return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
 }
 
+function compactTaskSnapshot(task: TaskSnapshot): TaskSnapshot {
+  const { finalResponse, finalResponsePreview, workerStderr, workerStderrPreview, ...compact } =
+    task;
+  void finalResponse;
+  void finalResponsePreview;
+  void workerStderr;
+  void workerStderrPreview;
+  return compact;
+}
+
+function targetMatches(task: TaskSnapshot, targetId: string): boolean {
+  return "repo" in task.target ? task.target.repo === targetId : targetId === "shell";
+}
+
 function gitOutput(cwd: string, args: string[]): string {
-  return execFileSync("git", args, {
+  return execFileSync(resolveGitExecutable(), args, {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]

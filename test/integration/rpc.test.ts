@@ -178,6 +178,78 @@ describe("daemon rpc", () => {
     }
   });
 
+  it("keeps list_tasks compact while get_task returns retained output", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-rpc-list-compact-"));
+    const paths = resolveFleetPaths(root);
+    const previousResponse = process.env.CODEX_FLEET_FAKE_WORKER_RESPONSE;
+    const previousStderr = process.env.CODEX_FLEET_FAKE_WORKER_STDERR;
+    process.env.CODEX_FLEET_FAKE_WORKER_RESPONSE = "x".repeat(4_000);
+    process.env.CODEX_FLEET_FAKE_WORKER_STDERR = "stderr ".repeat(800);
+    const daemon = await startDaemon(paths);
+    const orchestrator = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: orchestrator.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "large retained output"
+      })) as { taskId: string };
+      await waitUntilExited(rpc, delegated.taskId);
+
+      const listed = (await callDaemon(rpc, "list_tasks", {})) as {
+        tasks: Array<{
+          id: string;
+          finalResponse?: string;
+          finalResponsePreview?: string;
+          workerStderr?: string;
+          workerStderrPreview?: string;
+        }>;
+      };
+      expect(listed.tasks).toContainEqual(expect.objectContaining({ id: delegated.taskId }));
+      const listedTask = listed.tasks.find((task) => task.id === delegated.taskId);
+      expect(listedTask?.finalResponse).toBeUndefined();
+      expect(listedTask?.finalResponsePreview).toBeUndefined();
+      expect(listedTask?.workerStderr).toBeUndefined();
+      expect(listedTask?.workerStderrPreview).toBeUndefined();
+
+      const limited = (await callDaemon(rpc, "list_tasks", { targetId: "shell", limit: 1 })) as {
+        tasks: Array<{ id: string }>;
+      };
+      expect(limited.tasks).toHaveLength(1);
+      expect(limited.tasks[0]?.id).toBe(delegated.taskId);
+
+      const wrongTarget = (await callDaemon(rpc, "list_tasks", { targetId: "missing" })) as {
+        tasks: Array<{ id: string }>;
+      };
+      expect(wrongTarget.tasks).toHaveLength(0);
+
+      const future = (await callDaemon(rpc, "list_tasks", {
+        updatedSince: "2999-01-01T00:00:00.000Z"
+      })) as { tasks: Array<{ id: string }> };
+      expect(future.tasks).toHaveLength(0);
+
+      const detailed = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
+        task: { finalResponse?: string; workerStderr?: string };
+      };
+      expect(detailed.task.finalResponse).toBe(process.env.CODEX_FLEET_FAKE_WORKER_RESPONSE);
+      expect(detailed.task.workerStderr).toBe(process.env.CODEX_FLEET_FAKE_WORKER_STDERR);
+    } finally {
+      if (previousResponse === undefined) {
+        delete process.env.CODEX_FLEET_FAKE_WORKER_RESPONSE;
+      } else {
+        process.env.CODEX_FLEET_FAKE_WORKER_RESPONSE = previousResponse;
+      }
+      if (previousStderr === undefined) {
+        delete process.env.CODEX_FLEET_FAKE_WORKER_STDERR;
+      } else {
+        process.env.CODEX_FLEET_FAKE_WORKER_STDERR = previousStderr;
+      }
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("persists worker stderr separately from final responses", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-rpc-stderr-"));
     const paths = resolveFleetPaths(root);

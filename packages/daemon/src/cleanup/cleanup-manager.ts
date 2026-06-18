@@ -4,6 +4,7 @@ import type { TaskSnapshot } from "@codex-fleet/shared";
 
 import type { RepoConfig } from "../registry/repo-registry.js";
 import { FleetError } from "../rpc/errors.js";
+import { resolveGitExecutable } from "../git.js";
 
 export type CleanupResult = {
   cleaned: boolean;
@@ -20,7 +21,8 @@ export class CleanupManager {
       return { cleaned: false, reason: "repo_missing" };
     }
 
-    const dirty = execFileSync("git", ["status", "--porcelain"], {
+    const git = resolveGitExecutable();
+    const dirty = execFileSync(git, ["status", "--porcelain"], {
       cwd: task.worktreePath,
       encoding: "utf8"
     }).trim();
@@ -28,11 +30,11 @@ export class CleanupManager {
       throw new FleetError("conflict", `cleanup_blocked_dirty: ${task.worktreePath}`, "get_task");
     }
 
-    execFileSync("git", ["worktree", "remove", task.worktreePath], {
+    execFileSync(git, ["worktree", "remove", task.worktreePath], {
       cwd: repo.baseCheckout,
       stdio: "ignore"
     });
-    execFileSync("git", ["worktree", "prune"], {
+    execFileSync(git, ["worktree", "prune"], {
       cwd: repo.baseCheckout,
       stdio: "ignore"
     });
@@ -44,7 +46,7 @@ export class CleanupManager {
 
 export function deleteBranchIfMerged(repo: RepoConfig, branch: string): boolean {
   try {
-    execFileSync("git", ["branch", "-d", branch], {
+    execFileSync(resolveGitExecutable(), ["branch", "-d", branch], {
       cwd: repo.baseCheckout,
       stdio: "ignore"
     });

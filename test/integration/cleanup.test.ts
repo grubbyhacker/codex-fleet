@@ -33,7 +33,17 @@ describe("cleanup", () => {
       const cleanTask = await getTask(rpc, clean.taskId);
       expect(existsSync(cleanTask.worktreePath ?? "")).toBe(true);
       expect(branchExists(repo, cleanTask.branch ?? "")).toBe(true);
-      await callDaemon(rpc, "end_task", { taskId: clean.taskId });
+      const previousPath = process.env.PATH;
+      process.env.PATH = "";
+      try {
+        await callDaemon(rpc, "end_task", { taskId: clean.taskId });
+      } finally {
+        if (previousPath === undefined) {
+          delete process.env.PATH;
+        } else {
+          process.env.PATH = previousPath;
+        }
+      }
       expect(existsSync(cleanTask.worktreePath ?? "")).toBe(false);
       expect(branchExists(repo, cleanTask.branch ?? "")).toBe(false);
 

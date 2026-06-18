@@ -149,7 +149,9 @@ export type WaitTasksResponse = z.infer<typeof waitTasksResponseSchema>;
 
 export const listTasksRequestSchema = z.object({
   states: z.array(taskStateSchema).optional(),
-  targetId: z.string().min(1).optional()
+  targetId: z.string().min(1).optional(),
+  updatedSince: z.string().min(1).optional(),
+  limit: z.number().int().positive().max(500).optional()
 });
 export type ListTasksRequest = z.infer<typeof listTasksRequestSchema>;
 

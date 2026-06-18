@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import type { FleetPaths } from "../paths.js";
 import type { RepoConfig } from "../registry/repo-registry.js";
+import { resolveGitExecutable } from "../git.js";
 
 export type WorktreeResource = {
   branch: string;
@@ -21,10 +22,14 @@ export class WorktreeManager {
     const branch = `fleet/${repo.alias}/${taskShort}`;
     const worktreePath = join(repoWorktreesDir, taskShort);
     const startPoint = resolveFreshDefaultStartPoint(repo);
-    execFileSync("git", ["worktree", "add", "-b", branch, worktreePath, startPoint], {
-      cwd: repo.baseCheckout,
-      stdio: "ignore"
-    });
+    execFileSync(
+      resolveGitExecutable(),
+      ["worktree", "add", "-b", branch, worktreePath, startPoint],
+      {
+        cwd: repo.baseCheckout,
+        stdio: "ignore"
+      }
+    );
 
     return { branch, worktreePath };
   }
@@ -37,7 +42,7 @@ export function resolveFreshDefaultStartPoint(repo: RepoConfig): string {
 
   const remoteRef = `refs/remotes/origin/${repo.defaultBranch}`;
   execFileSync(
-    "git",
+    resolveGitExecutable(),
     ["fetch", "--prune", "origin", `+refs/heads/${repo.defaultBranch}:${remoteRef}`],
     {
       cwd: repo.baseCheckout,
@@ -49,7 +54,7 @@ export function resolveFreshDefaultStartPoint(repo: RepoConfig): string {
 
 function hasOriginRemote(repo: RepoConfig): boolean {
   try {
-    execFileSync("git", ["remote", "get-url", "origin"], {
+    execFileSync(resolveGitExecutable(), ["remote", "get-url", "origin"], {
       cwd: repo.baseCheckout,
       stdio: "ignore"
     });

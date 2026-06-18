@@ -250,21 +250,26 @@ async function runDashboard(): Promise<void> {
 async function loadDashboardData(options: DashboardOptions = {}): Promise<DashboardData> {
   const rpc = loadRpcOptions();
   const listed = (await callDaemon(rpc, "list_tasks", {})) as { tasks: TaskSnapshot[] };
+  let tasks = listed.tasks;
   const histories: Record<string, Event[]> = {};
   const collectedAt = new Date().toISOString();
   const selected = selectTask(
-    listed.tasks,
-    selectVisibleTasks(listed.tasks, Date.parse(collectedAt), options).tasks,
+    tasks,
+    selectVisibleTasks(tasks, Date.parse(collectedAt), options).tasks,
     options.taskId
   );
   if (selected) {
+    const detailed = (await callDaemon(rpc, "get_task", { taskId: selected.id })) as {
+      task: TaskSnapshot;
+    };
+    tasks = tasks.map((task) => (task.id === selected.id ? detailed.task : task));
     const result = (await callDaemon(rpc, "get_task_history", {
       taskId: selected.id,
       limit: 8
     })) as { events: Event[] };
     histories[selected.id] = result.events;
   }
-  return { tasks: listed.tasks, histories, collectedAt };
+  return { tasks, histories, collectedAt };
 }
 
 function loadRpcOptions(): { socketPath: string; clientId: string; token: string } {
