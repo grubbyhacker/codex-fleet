@@ -1,6 +1,7 @@
 import { callDaemon, readClientToken, resolveFleetPaths } from "@codex-fleet/daemon";
 import type { Event, TaskSnapshot, TaskState } from "@codex-fleet/shared";
 import { createCliRenderer, TextRenderable } from "@opentui/core";
+import { existsSync } from "node:fs";
 
 type DashboardData = {
   tasks: TaskSnapshot[];
@@ -251,8 +252,9 @@ function summarize(tasks: TaskSnapshot[]) {
     running: counts.get("running") ?? 0,
     stale: counts.get("stale") ?? 0,
     exited: counts.get("exited") ?? 0,
-    cleanupPending: tasks.filter((task) => terminalStates.has(task.state) && task.worktreePath)
-      .length,
+    cleanupPending: tasks.filter(
+      (task) => terminalStates.has(task.state) && hasExistingWorktree(task)
+    ).length,
     needsAttention: tasks.filter(needsAttention).length,
     reposTouched: repos.size,
     medianRuntime: formatDuration(median(durations)),
@@ -349,13 +351,16 @@ function stateBadge(task: TaskSnapshot, options: DashboardOptions): string {
 function formatTerminalStatus(task: TaskSnapshot): string {
   if (needsAttention(task)) {
     const reasons = [];
-    if (task.worktreePath) {
+    if (hasExistingWorktree(task)) {
       reasons.push("worktree");
     }
     if (task.state !== "exited") {
       reasons.push(task.state);
     }
     return `needs ${reasons.join("+")}`;
+  }
+  if (task.state !== "exited") {
+    return task.state;
   }
   if (task.exitCode !== undefined) {
     return `exit ${task.exitCode}`;
@@ -366,8 +371,9 @@ function formatTerminalStatus(task: TaskSnapshot): string {
 function attentionActions(task: TaskSnapshot): string[] {
   const id = task.id.slice(0, 8);
   const actions = [`inspect: codex-fleet status ${id}`, `events: codex-fleet logs ${id}`];
-  if (task.worktreePath) {
-    actions.push(`diff: git -C ${shellQuote(task.worktreePath)} status --short`);
+  const worktreePath = existingWorktreePath(task);
+  if (worktreePath) {
+    actions.push(`diff: git -C ${shellQuote(worktreePath)} status --short`);
     actions.push(`release: codex-fleet cleanup run --task ${id}`);
     actions.push(`force if disposable: codex-fleet cleanup run --task ${id} --force`);
   }
@@ -381,7 +387,15 @@ function needsAttention(task: TaskSnapshot): boolean {
   if (!terminalStates.has(task.state)) {
     return false;
   }
-  return Boolean(task.worktreePath) || task.state !== "exited" || (task.exitCode ?? 0) !== 0;
+  return hasExistingWorktree(task);
+}
+
+function hasExistingWorktree(task: TaskSnapshot): boolean {
+  return Boolean(existingWorktreePath(task));
+}
+
+function existingWorktreePath(task: TaskSnapshot): string | undefined {
+  return task.worktreePath && existsSync(task.worktreePath) ? task.worktreePath : undefined;
 }
 
 function formatQuiet(task: TaskSnapshot, now: number): string {

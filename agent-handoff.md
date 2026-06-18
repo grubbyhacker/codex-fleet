@@ -280,3 +280,17 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - TUI can now display `task_activity` timestamps as freshness, but detailed live transcript panes still need sanitized `codex/event` persistence.
+
+## 2026-06-18 TUI Attention Cleanup
+
+### Did
+
+- Released the remaining cleanup-ready Fleet worktree for task `de9007a1-6685-4f7e-83a0-0f69f2c1e202`.
+- Changed the TUI Needs Attention predicate to require an existing retained worktree; already-removed worktree paths and non-actionable historical failures no longer stay pinned as attention items.
+- Updated cleanup-pending summary counts and attention actions to use existing worktrees, not just historical `worktreePath` fields.
+- Added TUI regression coverage for removed worktrees and terminal failures without retained worktrees.
+- Rebuilt/installed standalone binaries and verified aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Relaunch any already-running TUI process to pick up the newly installed binary.

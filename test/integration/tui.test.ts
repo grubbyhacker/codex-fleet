@@ -80,37 +80,88 @@ describe("tui dashboard", () => {
   });
 
   it("promotes terminal tasks with retained worktrees as attention items", () => {
+    const worktreePath = mkdtempSync(join(tmpdir(), "codex-fleet-tui-worktree-"));
+    try {
+      const rendered = renderDashboard(
+        {
+          collectedAt: "2026-06-18T18:00:00.000Z",
+          histories: {},
+          tasks: [
+            task({
+              id: "repo-worktree-task",
+              state: "exited",
+              createdAt: "2026-06-18T17:55:00.000Z",
+              updatedAt: "2026-06-18T17:56:00.000Z",
+              worktreePath
+            }),
+            task({
+              id: "old-terminal-task",
+              state: "exited",
+              createdAt: "2026-06-18T10:00:00.000Z",
+              updatedAt: "2026-06-18T10:01:00.000Z"
+            })
+          ]
+        },
+        { color: false }
+      );
+
+      expect(rendered).toContain("attention 1");
+      expect(rendered).toContain("Needs Attention");
+      expect(rendered).toContain("repo-wor");
+      expect(rendered).toContain("needs worktree");
+      expect(rendered).toContain("inspect: codex-fleet status repo-wor");
+      expect(rendered).toContain(`diff: git -C '${worktreePath}' status --short`);
+      expect(rendered).toContain("release: codex-fleet cleanup run --task repo-wor");
+      expect(rendered).toContain("1 older terminal task hidden");
+    } finally {
+      rmSync(worktreePath, { force: true, recursive: true });
+    }
+  });
+
+  it("does not promote terminal tasks when retained worktrees are already removed", () => {
     const rendered = renderDashboard(
       {
         collectedAt: "2026-06-18T18:00:00.000Z",
         histories: {},
         tasks: [
           task({
-            id: "repo-worktree-task",
-            state: "exited",
-            createdAt: "2026-06-18T17:55:00.000Z",
-            updatedAt: "2026-06-18T17:56:00.000Z",
-            worktreePath: "/tmp/fleet/worktree"
-          }),
-          task({
-            id: "old-terminal-task",
+            id: "removed-worktree-task",
             state: "exited",
             createdAt: "2026-06-18T10:00:00.000Z",
-            updatedAt: "2026-06-18T10:01:00.000Z"
+            updatedAt: "2026-06-18T10:01:00.000Z",
+            worktreePath: "/tmp/codex-fleet-missing-worktree"
           })
         ]
       },
       { color: false }
     );
 
-    expect(rendered).toContain("attention 1");
-    expect(rendered).toContain("Needs Attention");
-    expect(rendered).toContain("repo-wor");
-    expect(rendered).toContain("needs worktree");
-    expect(rendered).toContain("inspect: codex-fleet status repo-wor");
-    expect(rendered).toContain("diff: git -C '/tmp/fleet/worktree' status --short");
-    expect(rendered).toContain("release: codex-fleet cleanup run --task repo-wor");
+    expect(rendered).toContain("attention 0");
+    expect(rendered).not.toContain("Needs Attention");
     expect(rendered).toContain("1 older terminal task hidden");
+  });
+
+  it("does not promote terminal failures without retained worktrees as attention items", () => {
+    const rendered = renderDashboard(
+      {
+        collectedAt: "2026-06-18T18:00:00.000Z",
+        histories: {},
+        tasks: [
+          task({
+            id: "failed-shell-task",
+            state: "failed_to_start",
+            createdAt: "2026-06-18T17:55:00.000Z",
+            updatedAt: "2026-06-18T17:56:00.000Z"
+          })
+        ]
+      },
+      { color: false }
+    );
+
+    expect(rendered).toContain("attention 0");
+    expect(rendered).not.toContain("Needs Attention");
+    expect(rendered).toContain("[FAILED_TO_START]");
+    expect(rendered).toContain("failed_to_start");
   });
 });
 
@@ -150,7 +201,7 @@ function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 
 function task(overrides: {
   id: string;
-  state: "exited" | "running";
+  state: "exited" | "failed_to_start" | "running";
   createdAt: string;
   updatedAt: string;
   lastActivityAt?: string;
