@@ -8,9 +8,11 @@
     "packages/*"
   ],
   "scripts": {
+    "build:bin": "bun run scripts/build-bin.ts",
     "check": "bun run typecheck && bun run lint && bun run format:check && bun test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "install:bin": "bun run build:bin && bun run scripts/install-bin.ts",
     "lint": "eslint .",
     "spike:bun": "bun run scripts/spike-bun.ts",
     "test": "vitest run",

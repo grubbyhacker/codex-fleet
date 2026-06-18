@@ -11,7 +11,6 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 export function cliProbe(): { ok: true; command: string } {
   return { ok: true, command: "codex-fleet" };
@@ -131,16 +130,25 @@ if (import.meta.main) {
     if (action === "print") {
       process.stdout.write(renderLaunchAgentPlist());
     } else if (action === "install") {
-      const plistPath = launchAgentPath();
-      mkdirSync(dirname(plistPath), { recursive: true });
-      writeFileSync(plistPath, renderLaunchAgentPlist(), { mode: 0o644 });
-      console.log(JSON.stringify({ installed: true, plistPath }, null, 2));
+      console.log(JSON.stringify(installLaunchAgent(), null, 2));
+    } else if (action === "load") {
+      console.log(JSON.stringify(loadLaunchAgent(), null, 2));
+    } else if (action === "unload") {
+      console.log(JSON.stringify(unloadLaunchAgent(), null, 2));
+    } else if (action === "restart") {
+      const installed = installLaunchAgent();
+      unloadLaunchAgent({ ignoreMissing: true });
+      console.log(JSON.stringify({ ...installed, ...loadLaunchAgent(), restarted: true }, null, 2));
+    } else if (action === "status") {
+      console.log(JSON.stringify(launchAgentStatus(), null, 2));
     } else if (action === "uninstall") {
       const plistPath = launchAgentPath();
       rmSync(plistPath, { force: true });
       console.log(JSON.stringify({ uninstalled: true, plistPath }, null, 2));
     } else {
-      throw new Error("Usage: codex-fleet service launch-agent <print|install|uninstall>");
+      throw new Error(
+        "Usage: codex-fleet service launch-agent <print|install|load|unload|restart|status|uninstall>"
+      );
     }
   }
 }
@@ -271,7 +279,7 @@ function isTerminal(state: TaskSnapshot["state"]): boolean {
 
 export function renderLaunchAgentPlist(): string {
   const paths = resolveFleetPaths();
-  const cliPath = fileURLToPath(import.meta.url);
+  const daemonPath = launchAgentDaemonPath();
   const envVars = launchAgentEnvironment();
   const env =
     envVars.length > 0
@@ -294,10 +302,7 @@ ${envVars
   <string>dev.codex-fleet.daemon</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${escapePlist(process.execPath)}</string>
-    <string>run</string>
-    <string>${escapePlist(cliPath)}</string>
-    <string>daemon</string>
+    <string>${escapePlist(daemonPath)}</string>
     <string>run</string>
   </array>${env}
   <key>RunAtLoad</key>
@@ -317,7 +322,23 @@ function launchAgentPath(): string {
   return join(homedir(), "Library", "LaunchAgents", "dev.codex-fleet.daemon.plist");
 }
 
+function launchAgentDaemonPath(): string {
+  return (
+    process.env.CODEX_FLEET_DAEMON_BIN ?? join(homedir(), ".local", "bin", "codex-fleet-daemon")
+  );
+}
+
 function launchAgentEnvironment(): Array<[string, string]> {
+  const defaults = new Map<string, string>([
+    ["CODEX_FLEET_WORKER_BACKEND", "codex"],
+    ["CODEX_FLEET_CODEX_COMMAND", "/Applications/Codex.app/Contents/Resources/codex"],
+    ["CODEX_FLEET_CODEX_MODEL", "gpt-5.3-codex-spark"]
+  ]);
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value) {
+      defaults.set(key, value);
+    }
+  }
   return [
     "CODEX_FLEET_STATE_DIR",
     "CODEX_FLEET_WORKER_BACKEND",
@@ -326,9 +347,98 @@ function launchAgentEnvironment(): Array<[string, string]> {
     "CODEX_FLEET_CODEX_TIMEOUT_MS",
     "CODEX_FLEET_AVAILABLE_MODEL_TIERS"
   ].flatMap((key) => {
-    const value = process.env[key];
+    const value = defaults.get(key);
     return value ? [[key, value]] : [];
   });
+}
+
+function installLaunchAgent(): { installed: true; plistPath: string; daemonPath: string } {
+  const plistPath = launchAgentPath();
+  mkdirSync(dirname(plistPath), { recursive: true });
+  writeFileSync(plistPath, renderLaunchAgentPlist(), { mode: 0o644 });
+  return { installed: true, plistPath, daemonPath: launchAgentDaemonPath() };
+}
+
+function loadLaunchAgent(): { loaded: true; label: string; domain: string; plistPath: string } {
+  ensureMacosLaunchctl();
+  const domain = launchAgentDomain();
+  const plistPath = launchAgentPath();
+  execFileSync("launchctl", ["bootstrap", domain, plistPath], { stdio: "pipe" });
+  return { loaded: true, label: launchAgentLabel(), domain, plistPath };
+}
+
+function unloadLaunchAgent(options: { ignoreMissing?: boolean } = {}): {
+  unloaded: true;
+  label: string;
+  domain: string;
+  plistPath: string;
+} {
+  ensureMacosLaunchctl();
+  const domain = launchAgentDomain();
+  const plistPath = launchAgentPath();
+  try {
+    execFileSync("launchctl", ["bootout", domain, plistPath], { stdio: "pipe" });
+  } catch (error) {
+    if (!options.ignoreMissing) {
+      throw error;
+    }
+  }
+  return { unloaded: true, label: launchAgentLabel(), domain, plistPath };
+}
+
+function launchAgentStatus(): {
+  label: string;
+  domain: string;
+  plistPath: string;
+  running: boolean;
+  state?: string;
+  pid?: number;
+  programArguments: string[];
+  raw?: string;
+} {
+  ensureMacosLaunchctl();
+  const service = `${launchAgentDomain()}/${launchAgentLabel()}`;
+  const programArguments = [launchAgentDaemonPath(), "run"];
+  try {
+    const raw = execFileSync("launchctl", ["print", service], { encoding: "utf8" });
+    const state = raw.match(/state = (.+)/)?.[1]?.trim();
+    const pidText = raw.match(/pid = ([0-9]+)/)?.[1];
+    return {
+      label: launchAgentLabel(),
+      domain: launchAgentDomain(),
+      plistPath: launchAgentPath(),
+      running: state === "running" || Boolean(pidText),
+      state,
+      pid: pidText ? Number(pidText) : undefined,
+      programArguments,
+      raw
+    };
+  } catch {
+    return {
+      label: launchAgentLabel(),
+      domain: launchAgentDomain(),
+      plistPath: launchAgentPath(),
+      running: false,
+      programArguments
+    };
+  }
+}
+
+function ensureMacosLaunchctl(): void {
+  if (process.platform !== "darwin") {
+    throw new Error("LaunchAgent commands are only supported on macOS");
+  }
+}
+
+function launchAgentDomain(): string {
+  if (typeof process.getuid !== "function") {
+    throw new Error("Cannot determine launchd user domain on this platform");
+  }
+  return `gui/${process.getuid()}`;
+}
+
+function launchAgentLabel(): string {
+  return "dev.codex-fleet.daemon";
 }
 
 function escapePlist(value: string): string {

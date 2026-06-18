@@ -88,9 +88,15 @@ describe("cli views", () => {
     try {
       const plist = await runCli(root, "service", "launch-agent", "print");
       expect(plist).toContain("dev.codex-fleet.daemon");
-      expect(plist).toContain("<string>daemon</string>");
+      expect(plist).toContain(".local/bin/codex-fleet-daemon");
       expect(plist).toContain("<string>run</string>");
+      expect(plist).not.toContain("<string>bun</string>");
+      expect(plist).not.toContain("packages/cli/src/index.ts");
       expect(plist).toContain("CODEX_FLEET_STATE_DIR");
+      expect(plist).toContain("CODEX_FLEET_WORKER_BACKEND");
+      expect(plist).toContain("CODEX_FLEET_CODEX_COMMAND");
+      expect(plist).toContain("CODEX_FLEET_CODEX_MODEL");
+      expect(plist).toContain("gpt-5.3-codex-spark");
       expect(plist).toContain(root);
     } finally {
       rmSync(root, { force: true, recursive: true });
