@@ -371,3 +371,17 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Decide whether to hard-reject shell delivery modes that imply repo mutation before worker launch.
+
+## 2026-06-18 TUI Layout And Redraw Pass
+
+### Did
+
+- Reshaped the dashboard into a header, compact Tasks pane, Selected task pane, and full-width bottom Events pane.
+- Increased selected-task event history fetches so the bottom pane has useful live activity depth.
+- Made dashboard frames fixed-height when terminal dimensions are known, preventing stale text from surviving refreshes.
+- Disabled raw ANSI color in the live OpenTUI loop to avoid escape-code redraw artifacts; `--once` output still honors color flags.
+- Rebuilt/installed standalone binaries and verified aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Replace raw ANSI styling with native OpenTUI styling before re-enabling color in the live dashboard.

@@ -113,7 +113,7 @@ describe("tui dashboard", () => {
     expect(rendered).toContain("quiet 15m ago");
   });
 
-  it("uses a right-side activity pane for selected task details", () => {
+  it("uses selected task details with a full-width bottom event pane", () => {
     const selected = task({
       id: "selected-task-id",
       state: "exited",
@@ -142,14 +142,16 @@ describe("tui dashboard", () => {
       { color: false, width: 120 }
     );
 
-    expect(rendered).toContain("+ Fleet");
-    expect(rendered).toContain("+ Activity");
+    expect(rendered).toContain("+ Tasks");
+    expect(rendered).toContain("+ Selected");
+    expect(rendered).toContain("+ Events");
     expect(rendered).toContain("Selected Task");
     expect(rendered).toContain("Final Response");
     expect(rendered).toContain("The full answer is visible");
     expect(rendered).toContain("Worker Stderr");
     expect(rendered).toContain("stderr diagnostic line");
     expect(rendered).toContain("task_activity");
+    expect(rendered.indexOf("+ Events")).toBeGreaterThan(rendered.indexOf("+ Selected"));
   });
 
   it("promotes terminal tasks with retained worktrees as attention items", () => {

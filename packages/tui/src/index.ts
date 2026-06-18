@@ -18,8 +18,10 @@ type DashboardOptions = {
 };
 
 type DashboardView = {
-  leftLines: string[];
-  rightLines: string[];
+  headerLines: string[];
+  taskLines: string[];
+  detailLines: string[];
+  eventLines: string[];
 };
 
 const terminalStates = new Set<TaskState>(["exited", "failed_to_start", "cancelled", "timed_out"]);
@@ -36,24 +38,23 @@ export function tuiProbe(): { ok: true; dashboard: "opentui" } {
 export function renderDashboard(data: DashboardData, options: DashboardOptions = {}): string {
   const view = buildDashboardView(data, options);
   const width = options.width ?? 120;
-  if (width >= 112) {
-    return renderSplitDashboard(view, width, options);
-  }
-  return `${[...view.leftLines, "", ...view.rightLines].join("\n")}\n`;
+  return finalizeDashboardFrame(renderDashboardLayout(view, width, options), width, options);
 }
 
 function buildDashboardView(data: DashboardData, options: DashboardOptions): DashboardView {
-  const leftLines: string[] = [];
-  const rightLines: string[] = [];
+  const headerLines: string[] = [];
+  const taskLines: string[] = [];
+  const detailLines: string[] = [];
+  const eventLines: string[] = [];
   const now = Date.parse(data.collectedAt);
   const visible = selectVisibleTasks(data.tasks, now, options);
   const selected = selectTask(data.tasks, visible.tasks, options.taskId);
   const summary = summarize(data.tasks);
   const liveCount = summary.queued + summary.running;
 
-  leftLines.push(style("Codex Fleet", "title", options));
-  leftLines.push(`Updated: ${data.collectedAt} (${formatAge(now, now)})`);
-  leftLines.push(
+  headerLines.push(style("Codex Fleet", "title", options));
+  headerLines.push(`Updated: ${data.collectedAt} (${formatAge(now, now)})`);
+  headerLines.push(
     [
       liveCount > 0
         ? style(`LIVE ${liveCount}`, "active", options)
@@ -70,7 +71,7 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
       `cleanup-pending ${summary.cleanupPending}`
     ].join(" | ")
   );
-  leftLines.push(
+  headerLines.push(
     [
       `tasks ${data.tasks.length}`,
       `visible ${visible.tasks.length}`,
@@ -84,50 +85,49 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
       .filter((part): part is string => Boolean(part))
       .join(" | ")
   );
-  leftLines.push("");
 
   if (visible.live.length > 0) {
-    leftLines.push(style("Live", "section", options));
+    taskLines.push(style("Live", "section", options));
     for (const task of visible.live) {
-      leftLines.push(formatTaskRow(task, now, options));
+      taskLines.push(formatTaskRow(task, now, options));
     }
   } else {
-    leftLines.push(`${style("Live", "section", options)}  ${style("none", "dim", options)}`);
+    taskLines.push(`${style("Live", "section", options)}  ${style("none", "dim", options)}`);
   }
 
   if (visible.needsAttention.length > 0) {
-    leftLines.push("");
-    leftLines.push(style("Action Queue", "warn", options));
+    taskLines.push("");
+    taskLines.push(style("Action Queue", "warn", options));
     for (const task of visible.needsAttention) {
-      leftLines.push(formatTaskRow(task, now, options));
+      taskLines.push(formatTaskRow(task, now, options));
       for (const action of attentionActions(task)) {
-        leftLines.push(`    ${style(action, "dim", options)}`);
+        taskLines.push(`    ${style(action, "dim", options)}`);
       }
     }
   }
 
   if (visible.stale.length > 0) {
-    leftLines.push("");
-    leftLines.push(style("Stale", "warn", options));
+    taskLines.push("");
+    taskLines.push(style("Stale", "warn", options));
     for (const task of visible.stale) {
-      leftLines.push(formatTaskRow(task, now, options));
+      taskLines.push(formatTaskRow(task, now, options));
     }
   }
 
   if (visible.terminal.length > 0) {
-    leftLines.push("");
-    leftLines.push(
+    taskLines.push("");
+    taskLines.push(
       style(options.showAll ? "Terminal History" : "Recent Results", "section", options)
     );
     for (const task of visible.terminal) {
-      leftLines.push(formatTaskRow(task, now, options));
+      taskLines.push(formatTaskRow(task, now, options));
     }
   }
 
   if (visible.hiddenTerminal + visible.hiddenStale > 0) {
-    leftLines.push("");
+    taskLines.push("");
     const hidden = visible.hiddenTerminal + visible.hiddenStale;
-    leftLines.push(
+    taskLines.push(
       style(
         `${hidden} older task${hidden === 1 ? "" : "s"} hidden; use --all to show them.`,
         "dim",
@@ -137,71 +137,79 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
   }
 
   if (selected) {
-    rightLines.push(style("Selected Task", "section", options));
-    rightLines.push(`Task ${selected.id}`);
-    rightLines.push(`Target:   ${formatTarget(selected)}`);
-    rightLines.push(`Session:  ${formatSession(selected)}`);
-    rightLines.push(`State:    ${stateBadge(selected, options)}`);
-    rightLines.push(
+    detailLines.push(style("Selected Task", "section", options));
+    detailLines.push(`Task ${selected.id}`);
+    detailLines.push(`Target:   ${formatTarget(selected)}`);
+    detailLines.push(`Session:  ${formatSession(selected)}`);
+    detailLines.push(`State:    ${stateBadge(selected, options)}`);
+    detailLines.push(
       `Started:  ${selected.createdAt} (${formatAge(Date.parse(selected.createdAt), now)} ago)`
     );
-    rightLines.push(
+    detailLines.push(
       `Updated:  ${selected.updatedAt} (${formatAge(Date.parse(selected.updatedAt), now)} ago)`
     );
     if (liveStates.has(selected.state) || selected.state === "stale") {
-      rightLines.push(`Activity: quiet ${formatQuiet(selected, now)}`);
+      detailLines.push(`Activity: quiet ${formatQuiet(selected, now)}`);
     }
     if (terminalStates.has(selected.state)) {
       const status = formatTerminalStatus(selected);
       if (status) {
-        rightLines.push(`Status:   ${status}`);
+        detailLines.push(`Status:   ${status}`);
+      }
+    }
+    if (needsAttention(selected)) {
+      detailLines.push("");
+      detailLines.push(style("Actions", "warn", options));
+      for (const action of attentionActions(selected)) {
+        detailLines.push(`  ${action}`);
       }
     }
     if (selected.worktreePath) {
-      rightLines.push(`Worktree: ${selected.worktreePath}`);
+      detailLines.push(`Worktree: ${selected.worktreePath}`);
     }
     if (selected.shellPath) {
-      rightLines.push(`Shell cwd: ${selected.shellPath}`);
+      detailLines.push(`Shell cwd: ${selected.shellPath}`);
     }
     if (selected.branch) {
-      rightLines.push(`Branch:   ${selected.branch}`);
+      detailLines.push(`Branch:   ${selected.branch}`);
     }
     if (selected.exitCode !== undefined) {
-      rightLines.push(`Exit:     ${selected.exitCode}`);
+      detailLines.push(`Exit:     ${selected.exitCode}`);
     }
     if (selected.finalResponse || selected.finalResponsePreview) {
-      rightLines.push("");
-      rightLines.push(style("Final Response", "section", options));
-      rightLines.push(
-        ...previewBlock(selected.finalResponse ?? selected.finalResponsePreview ?? "", 10)
+      detailLines.push("");
+      detailLines.push(style("Final Response", "section", options));
+      detailLines.push(
+        ...previewBlock(selected.finalResponse ?? selected.finalResponsePreview ?? "", 10, 112)
       );
     } else if (liveStates.has(selected.state)) {
-      rightLines.push("");
-      rightLines.push(style("Activity", "section", options));
-      rightLines.push(style("No final response yet.", "dim", options));
+      detailLines.push("");
+      detailLines.push(style("Activity", "section", options));
+      detailLines.push(style("No final response yet.", "dim", options));
     }
     if (selected.workerStderr || selected.workerStderrPreview) {
-      rightLines.push("");
-      rightLines.push(style("Worker Stderr", "warn", options));
-      rightLines.push(
-        ...previewBlock(selected.workerStderr ?? selected.workerStderrPreview ?? "", 6)
+      detailLines.push("");
+      detailLines.push(style("Worker Stderr", "warn", options));
+      detailLines.push(
+        ...previewBlock(selected.workerStderr ?? selected.workerStderrPreview ?? "", 6, 112)
       );
     }
 
     const history = data.histories[selected.id] ?? [];
     if (history.length > 0) {
-      rightLines.push("");
-      rightLines.push(style("Events", "section", options));
-      for (const event of history.slice(-12)) {
-        rightLines.push(formatEventRow(event, options));
+      for (const event of history.slice(-24)) {
+        eventLines.push(formatEventRow(event, options));
       }
+    } else {
+      eventLines.push(style("No events for selected task.", "dim", options));
     }
   } else {
-    rightLines.push(style("Selected Task", "section", options));
-    rightLines.push(style("No visible task selected.", "dim", options));
+    detailLines.push(style("Selected Task", "section", options));
+    detailLines.push(style("No visible task selected.", "dim", options));
+    eventLines.push(style("No selected task.", "dim", options));
   }
 
-  return { leftLines, rightLines };
+  return { headerLines, taskLines, detailLines, eventLines };
 }
 
 if (import.meta.main) {
@@ -238,10 +246,16 @@ async function runDashboard(): Promise<void> {
 
   const refresh = async () => {
     try {
-      const options = parseOptions();
+      const options = { ...parseOptions(), color: false };
       text.content = renderDashboard(await loadDashboardData(options), options);
     } catch (error) {
-      text.content = `Codex Fleet\n${error instanceof Error ? error.message : String(error)}\n`;
+      const options = { ...parseOptions(), color: false };
+      const width = options.width ?? 120;
+      text.content = finalizeDashboardFrame(
+        `Codex Fleet\n${error instanceof Error ? error.message : String(error)}`,
+        width,
+        options
+      );
     }
   };
 
@@ -268,7 +282,7 @@ async function loadDashboardData(options: DashboardOptions = {}): Promise<Dashbo
     tasks = tasks.map((task) => (task.id === selected.id ? detailed.task : task));
     const result = (await callDaemon(rpc, "get_task_history", {
       taskId: selected.id,
-      limit: 8
+      limit: 24
     })) as { events: Event[] };
     histories[selected.id] = result.events;
   }
@@ -307,29 +321,106 @@ function parseTerminalDimension(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function renderSplitDashboard(
+function renderDashboardLayout(
   view: DashboardView,
   width: number,
   options: DashboardOptions
 ): string {
-  const gap = 1;
-  const leftWidth = Math.max(58, Math.floor(width * 0.58));
+  if (width >= 104) {
+    return renderWideDashboard(view, width, options);
+  }
+  return renderStackedDashboard(view, width, options);
+}
+
+function renderWideDashboard(
+  view: DashboardView,
+  width: number,
+  options: DashboardOptions
+): string {
+  const gap = 2;
+  const leftWidth = clampNumber(Math.floor(width * 0.36), 44, 62);
   const rightWidth = width - leftWidth - gap;
-  if (rightWidth < 42) {
-    return `${[...view.leftLines, "", ...view.rightLines].join("\n")}\n`;
+  const header = renderHeader(view.headerLines, width);
+  const headerHeight = header.length + 1;
+  const mainBoxHeight =
+    options.height !== undefined
+      ? clampNumber(
+          Math.max(view.taskLines.length, view.detailLines.length) + 2,
+          8,
+          Math.min(22, Math.max(8, Math.max(0, options.height - headerHeight) - 6))
+        )
+      : undefined;
+  const eventBoxHeight =
+    options.height !== undefined && mainBoxHeight !== undefined
+      ? Math.max(4, Math.max(0, options.height - headerHeight) - mainBoxHeight)
+      : undefined;
+  const mainInnerLines = mainBoxHeight ? Math.max(1, mainBoxHeight - 2) : undefined;
+  const eventInnerLines = eventBoxHeight ? Math.max(1, eventBoxHeight - 2) : undefined;
+
+  const tasksBox = renderBox("Tasks", view.taskLines, leftWidth, options, mainInnerLines);
+  const selectedBox = renderBox("Selected", view.detailLines, rightWidth, options, mainInnerLines);
+  const eventsBox = renderBox("Events", view.eventLines, width, options, eventInnerLines);
+
+  return [
+    ...header,
+    "",
+    ...combineColumns(tasksBox, selectedBox, leftWidth, rightWidth, gap),
+    ...eventsBox
+  ].join("\n");
+}
+
+function renderStackedDashboard(
+  view: DashboardView,
+  width: number,
+  options: DashboardOptions
+): string {
+  const header = renderHeader(view.headerLines, width);
+  const boxes = [
+    renderBox("Tasks", view.taskLines, width, options),
+    renderBox("Selected", view.detailLines, width, options),
+    renderBox("Events", view.eventLines, width, options)
+  ];
+  return [...header, "", ...boxes.flatMap((box, index) => (index === 0 ? box : ["", ...box]))].join(
+    "\n"
+  );
+}
+
+function finalizeDashboardFrame(
+  rendered: string,
+  width: number,
+  options: DashboardOptions
+): string {
+  const lines = rendered.split("\n").map((line) => fitLine(line, width));
+  if (!options.height) {
+    return `${lines.join("\n")}\n`;
   }
 
-  const maxInnerLines = options.height ? Math.max(4, options.height - 2) : undefined;
-  const leftBox = renderBox("Fleet", view.leftLines, leftWidth, options, maxInnerLines);
-  const rightBox = renderBox("Activity", view.rightLines, rightWidth, options, maxInnerLines);
+  const frame = lines.slice(0, options.height);
+  while (frame.length < options.height) {
+    frame.push(" ".repeat(width));
+  }
+  return frame.join("\n");
+}
+
+function renderHeader(lines: string[], width: number): string[] {
+  return lines.map((line) => fitLine(line, width));
+}
+
+function combineColumns(
+  leftBox: string[],
+  rightBox: string[],
+  leftWidth: number,
+  rightWidth: number,
+  gap: number
+): string[] {
   const rows = Math.max(leftBox.length, rightBox.length);
   const lines: string[] = [];
   for (let index = 0; index < rows; index += 1) {
     const left = padVisible(leftBox[index] ?? "", leftWidth);
     const right = padVisible(rightBox[index] ?? "", rightWidth);
-    lines.push(`${left} ${right}`);
+    lines.push(`${left}${" ".repeat(gap)}${right}`);
   }
-  return `${lines.join("\n")}\n`;
+  return lines;
 }
 
 function renderBox(
@@ -343,7 +434,9 @@ function renderBox(
   const top = `+${visibleTitle}${"-".repeat(Math.max(0, width - visibleTitle.length - 2))}+`;
   const bottom = `+${"-".repeat(Math.max(0, width - 2))}+`;
   const innerWidth = Math.max(1, width - 4);
-  const innerLines = maxInnerLines ? clampLines(lines, maxInnerLines, options) : lines;
+  const innerLines = maxInnerLines
+    ? padLines(clampLines(lines, maxInnerLines, options), maxInnerLines)
+    : lines;
   return [
     style(top, "border", options),
     ...innerLines.map(
@@ -352,6 +445,13 @@ function renderBox(
     ),
     style(bottom, "border", options)
   ];
+}
+
+function padLines(lines: string[], targetLength: number): string[] {
+  if (lines.length >= targetLength) {
+    return lines;
+  }
+  return [...lines, ...Array.from({ length: targetLength - lines.length }, () => "")];
 }
 
 function clampLines(lines: string[], maxLines: number, options: DashboardOptions): string[] {
@@ -505,8 +605,8 @@ function eventStyle(
   return "info";
 }
 
-function previewBlock(value: string, maxLines: number): string[] {
-  const lines = wrapText(value.trim(), 100);
+function previewBlock(value: string, maxLines: number, width: number): string[] {
+  const lines = wrapText(value.trim(), width);
   if (lines.length === 0) {
     return ["(empty)"];
   }
@@ -643,6 +743,10 @@ function formatAge(timestamp: number, now: number): string {
     return `${hours}h`;
   }
   return `${Math.floor(hours / 24)}d`;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function oneLine(value: string, maxLength: number): string {
