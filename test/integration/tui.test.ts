@@ -4,10 +4,12 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import type { TaskSnapshot } from "../../packages/shared/src/index.js";
 import { resolveFleetPaths } from "../../packages/daemon/src/paths.js";
 import { createClient } from "../../packages/daemon/src/rpc/auth.js";
 import { callDaemon } from "../../packages/daemon/src/rpc/client.js";
 import { startDaemon } from "../../packages/daemon/src/rpc/server.js";
+import { renderDashboard } from "../../packages/tui/src/index.js";
 
 describe("tui dashboard", () => {
   it("renders fleet-wide read-only task data for a dashboard client", async () => {
@@ -35,6 +37,46 @@ describe("tui dashboard", () => {
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });
     }
+  });
+
+  it("puts active work first and hides old terminal noise by default", () => {
+    const now = "2026-06-18T18:00:00.000Z";
+    const rendered = renderDashboard(
+      {
+        collectedAt: now,
+        histories: {},
+        tasks: [
+          task({
+            id: "old-terminal-task",
+            state: "exited",
+            createdAt: "2026-06-18T10:00:00.000Z",
+            updatedAt: "2026-06-18T10:02:00.000Z"
+          }),
+          task({
+            id: "active-task-id",
+            state: "running",
+            createdAt: "2026-06-18T17:55:00.000Z",
+            updatedAt: "2026-06-18T17:55:00.000Z",
+            lastActivityAt: "2026-06-18T17:55:00.000Z"
+          }),
+          task({
+            id: "fresh-terminal-task",
+            state: "exited",
+            createdAt: "2026-06-18T17:50:00.000Z",
+            updatedAt: "2026-06-18T17:59:00.000Z"
+          })
+        ]
+      },
+      { color: false }
+    );
+
+    expect(rendered).toContain("ACTIVE 1");
+    expect(rendered).toContain("hidden-old 1");
+    expect(rendered).toContain("1 older terminal task hidden");
+    expect(rendered).toContain("active-task-id");
+    expect(rendered).toContain("fresh-te");
+    expect(rendered).not.toContain("old-terminal-task");
+    expect(rendered.indexOf("active-t")).toBeLessThan(rendered.indexOf("fresh-te"));
   });
 });
 
@@ -70,4 +112,25 @@ function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   return Object.fromEntries(
     Object.entries(env).filter((entry): entry is [string, string] => Boolean(entry[1]))
   );
+}
+
+function task(overrides: {
+  id: string;
+  state: "exited" | "running";
+  createdAt: string;
+  updatedAt: string;
+  lastActivityAt?: string;
+}): TaskSnapshot {
+  return {
+    createdAt: overrides.createdAt,
+    deliveryMode: "research_only",
+    exitCode: overrides.state === "exited" ? 0 : undefined,
+    id: overrides.id,
+    lastActivityAt: overrides.lastActivityAt,
+    ownerSession: { clientId: "orch" },
+    risk: "low",
+    state: overrides.state,
+    target: { repo: "youknowme" },
+    updatedAt: overrides.updatedAt
+  };
 }
