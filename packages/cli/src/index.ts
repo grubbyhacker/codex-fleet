@@ -253,7 +253,7 @@ async function forceCleanup(taskId: string): Promise<{
   if (!("repo" in task.target)) {
     throw new Error(`Task "${taskId}" is not a repo task`);
   }
-  const repo = loadRepoBaseCheckout(resolveFleetPaths(), task.target.repo);
+  const repo = loadRepoOwnerPath(resolveFleetPaths(), task.target.repo);
   const git = resolveGitExecutable();
   execFileSync(git, ["worktree", "remove", "--force", task.worktreePath], {
     cwd: repo.baseCheckout,
@@ -264,18 +264,29 @@ async function forceCleanup(taskId: string): Promise<{
   return { accepted: true, taskId, cleanup: { cleaned: true, forced: true, branchDeleted } };
 }
 
-function loadRepoBaseCheckout(
+function loadRepoOwnerPath(
   paths: ReturnType<typeof resolveFleetPaths>,
   alias: string
 ): { baseCheckout: string } {
   const registry = JSON.parse(readFileSync(paths.reposPath, "utf8")) as {
-    repos?: Array<{ alias: string; baseCheckout: string }>;
+    repos?: Array<{
+      alias: string;
+      baseCheckout?: string;
+      mirrorPath?: string;
+      remoteUrl?: string;
+    }>;
   };
   const repo = registry.repos?.find((entry) => entry.alias === alias);
   if (!repo) {
     throw new Error(`Unknown repo target "${alias}" in ${paths.reposPath}`);
   }
-  return repo;
+  const baseCheckout = repo.remoteUrl
+    ? (repo.mirrorPath ?? join(paths.reposDir, `${repo.alias}.git`))
+    : repo.baseCheckout;
+  if (!baseCheckout) {
+    throw new Error(`Repo target "${alias}" has no remoteUrl or baseCheckout`);
+  }
+  return { baseCheckout };
 }
 
 function dirtyFileCount(worktreePath: string): number {

@@ -71,6 +71,7 @@ describe("codex worker backend", () => {
     const args = codexWorkerToolArguments(
       {
         taskId: "task-shell",
+        shellPath: "/tmp/codex-fleet-shell/task-shell",
         request: {
           target: { shell: true },
           deliveryMode: "full_delivery",
@@ -78,10 +79,12 @@ describe("codex worker backend", () => {
           prompt: "Deploy the current service"
         }
       },
-      "/Users/roger/src/agent-infra/vps-ops"
+      "/tmp/codex-fleet-shell/task-shell"
     );
 
+    expect(args["cwd"]).toBe("/tmp/codex-fleet-shell/task-shell");
     expect(args["developer-instructions"]).toContain("no isolated repo worktree");
+    expect(args["developer-instructions"]).toContain("/tmp/codex-fleet-shell/task-shell");
     expect(args["developer-instructions"]).toContain("Treat local shared checkouts as read-only");
     expect(args["developer-instructions"]).toContain("do not mutate shared repo checkouts");
     expect(args["developer-instructions"]).toContain("repo target is required");

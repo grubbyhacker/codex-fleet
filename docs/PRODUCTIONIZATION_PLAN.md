@@ -105,14 +105,14 @@ Do not delete the POC yet. Retire it only after v1 has handled real multi-repo w
 
 ## Repo Registry
 
-Write `~/.codex-fleet/repos.json` with:
+Target public-safe shape for `~/.codex-fleet/repos.json`:
 
 ```json
 {
   "repos": [
     {
       "alias": "vps-ops",
-      "baseCheckout": "/Users/roger/src/agent-infra/vps-ops",
+      "remoteUrl": "git@github.com:grubbyhacker/vps-ops.git",
       "defaultBranch": "main",
       "branchProtected": false,
       "verifyCommands": [
@@ -123,7 +123,7 @@ Write `~/.codex-fleet/repos.json` with:
     },
     {
       "alias": "youknowme",
-      "baseCheckout": "/Users/roger/src/agent-infra/youknowme",
+      "remoteUrl": "git@github.com:grubbyhacker/youknowme.git",
       "defaultBranch": "main",
       "branchProtected": true,
       "verifyCommands": ["mise run lint", "mise run test"],
@@ -131,7 +131,7 @@ Write `~/.codex-fleet/repos.json` with:
     },
     {
       "alias": "gh-agent-broker",
-      "baseCheckout": "/Users/roger/src/agent-infra/gh-agent-broker",
+      "remoteUrl": "git@github.com:grubbyhacker/gh-agent-broker.git",
       "defaultBranch": "main",
       "branchProtected": true,
       "verifyCommands": ["make check"],
@@ -139,7 +139,7 @@ Write `~/.codex-fleet/repos.json` with:
     },
     {
       "alias": "ykmcorpus",
-      "baseCheckout": "/Users/roger/src/agent-infra/ykmcorpus",
+      "remoteUrl": "git@github.com:grubbyhacker/ykmcorpus.git",
       "defaultBranch": "main",
       "branchProtected": true,
       "verifyCommands": ["mise run validate"],
@@ -149,11 +149,10 @@ Write `~/.codex-fleet/repos.json` with:
 }
 ```
 
-Known facts from planning:
+Current implementation note:
 
-- All four repos exist under `/Users/roger/src/agent-infra`.
-- All four had `origin/HEAD` at `main`.
-- All four working trees were clean at planning time.
+- `remoteUrl` is the preferred schema and uses Fleet-owned mirrors under `~/.codex-fleet/repos`.
+- `baseCheckout` remains a compatibility option for private/local development configs during migration.
 
 ## Verification
 

@@ -34,7 +34,7 @@ const CodexEventNotificationSchema = NotificationSchema.extend({
 
 export class CodexWorkerBackend implements WorkerBackend {
   async run(input: WorkerInput): Promise<WorkerResult> {
-    const cwd = input.worktreePath ?? input.repoBaseCheckout ?? process.cwd();
+    const cwd = input.worktreePath ?? input.repoBaseCheckout ?? input.shellPath ?? process.cwd();
     const transport = new StdioClientTransport({
       command: resolveCodexCommand(),
       args: ["mcp-server"],
@@ -147,7 +147,7 @@ function workerInstructions(input: WorkerInput): string {
     ? `You're in a fresh git worktree at ${input.worktreePath}. Before working, make the environment ready per AGENTS.md; if a tool reports "not trusted," trust it for this path.`
     : input.repoBaseCheckout
       ? `You are doing read-only repo research in the registered base checkout at ${input.repoBaseCheckout}. Do not modify files, create branches, or change git state.`
-      : "You are running as a Codex Fleet shell worker with host access and no isolated repo worktree. Treat local shared checkouts as read-only: do not run git checkout/switch/add/commit/push there and do not edit files in those repos. If the task requires repo mutation, report that it should be delegated to a repo target so Fleet can create an isolated worktree.";
+      : `You are running as a Codex Fleet shell worker with host access and no isolated repo worktree. Your Fleet-owned scratch directory is ${input.shellPath ?? "the current working directory"}. Treat local shared checkouts as read-only: do not run git checkout/switch/add/commit/push there and do not edit files in those repos. If the task requires repo mutation, report that it should be delegated to a repo target so Fleet can create an isolated worktree.`;
   return [
     "You are a task-scoped worker agent in a local Codex Fleet.",
     `Task id: ${input.taskId}`,

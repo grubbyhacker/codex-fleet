@@ -11,6 +11,33 @@ import { callDaemon } from "../../packages/daemon/src/rpc/client.js";
 import { startDaemon } from "../../packages/daemon/src/rpc/server.js";
 
 describe("cleanup", () => {
+  it("allocates and removes Fleet-owned shell scratch directories", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-shell-cleanup-"));
+    const paths = resolveFleetPaths(root);
+    const daemon = await startDaemon(paths);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "shell scratch"
+      })) as { taskId: string };
+      const task = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
+        task: { shellPath?: string };
+      };
+      expect(task.task.shellPath).toContain(paths.shellDir);
+      expect(existsSync(task.task.shellPath ?? "")).toBe(true);
+
+      await callDaemon(rpc, "end_task", { taskId: delegated.taskId });
+      expect(existsSync(task.task.shellPath ?? "")).toBe(false);
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("removes clean worktrees on end_task and blocks dirty worktrees", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-cleanup-"));
     const repo = join(root, "base-repo");

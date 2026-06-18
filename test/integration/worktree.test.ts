@@ -116,6 +116,79 @@ describe("repo registry and worktree isolation", () => {
     }
   });
 
+  it("creates worktrees from Fleet-owned mirrors for remoteUrl repos", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-worktree-mirror-"));
+    const seed = join(root, "seed-repo");
+    const remote = join(root, "remote.git");
+    initRepo(seed);
+    execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: seed, stdio: "ignore" });
+    execFileSync("git", ["push", "-u", "origin", "main"], { cwd: seed, stdio: "ignore" });
+
+    const paths = resolveFleetPaths(join(root, "fleet"));
+    writeRemoteRepoRegistry(paths.rootDir, paths.reposPath, remote);
+    const daemon = await startDaemon(paths);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { repo: "fixture" },
+        deliveryMode: "patch",
+        prompt: "patch from mirror"
+      })) as { taskId: string };
+      const task = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
+        task: { branch?: string; worktreePath?: string };
+      };
+
+      expect(existsSync(join(paths.reposDir, "fixture.git"))).toBe(true);
+      expect(task.task.worktreePath).toContain(join(paths.worktreesDir, "fixture"));
+      expect(task.task.branch).toMatch(/^fleet\/fixture\//);
+      expect(readFileSync(join(task.task.worktreePath ?? "", "README.md"), "utf8")).toBe(
+        "# fixture\n"
+      );
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("creates detached research worktrees for remoteUrl repos", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-worktree-research-mirror-"));
+    const seed = join(root, "seed-repo");
+    const remote = join(root, "remote.git");
+    initRepo(seed);
+    execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: seed, stdio: "ignore" });
+    execFileSync("git", ["push", "-u", "origin", "main"], { cwd: seed, stdio: "ignore" });
+
+    const paths = resolveFleetPaths(join(root, "fleet"));
+    writeRemoteRepoRegistry(paths.rootDir, paths.reposPath, remote);
+    const daemon = await startDaemon(paths);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { repo: "fixture" },
+        deliveryMode: "research_only",
+        prompt: "research from mirror"
+      })) as { taskId: string };
+      const task = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
+        task: { branch?: string; worktreePath?: string };
+      };
+
+      expect(task.task.branch).toBeUndefined();
+      expect(task.task.worktreePath).toContain(join(paths.worktreesDir, "fixture"));
+      expect(readFileSync(join(task.task.worktreePath ?? "", "README.md"), "utf8")).toBe(
+        "# fixture\n"
+      );
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("reports review tasks that leave uncommitted files and empty branches", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-worktree-postcheck-"));
     const repo = join(root, "base-repo");
@@ -199,6 +272,25 @@ function writeRepoRegistry(rootDir: string, reposPath: string, repo: string): vo
         {
           alias: "fixture",
           baseCheckout: repo,
+          defaultBranch: "main",
+          branchProtected: true,
+          verifyCommands: ["bun test"],
+          defaultModelTier: "standard"
+        }
+      ]
+    })}\n`
+  );
+}
+
+function writeRemoteRepoRegistry(rootDir: string, reposPath: string, remoteUrl: string): void {
+  mkdirSync(rootDir, { recursive: true });
+  writeFileSync(
+    reposPath,
+    `${JSON.stringify({
+      repos: [
+        {
+          alias: "fixture",
+          remoteUrl,
           defaultBranch: "main",
           branchProtected: true,
           verifyCommands: ["bun test"],

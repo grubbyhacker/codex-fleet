@@ -4,6 +4,8 @@ import { join } from "node:path";
 export type FleetPaths = {
   rootDir: string;
   clientsDir: string;
+  reposDir: string;
+  shellDir: string;
   tasksDir: string;
   worktreesDir: string;
   reposPath: string;
@@ -20,6 +22,8 @@ export function resolveFleetPaths(rootDir = defaultFleetRoot()): FleetPaths {
   return {
     rootDir,
     clientsDir: join(rootDir, "clients"),
+    reposDir: join(rootDir, "repos"),
+    shellDir: join(rootDir, "shell"),
     tasksDir: join(rootDir, "tasks"),
     worktreesDir: join(rootDir, "worktrees"),
     reposPath: join(rootDir, "repos.json"),

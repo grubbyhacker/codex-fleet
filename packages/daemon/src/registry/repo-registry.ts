@@ -5,14 +5,20 @@ import { z } from "zod";
 
 import type { FleetPaths } from "../paths.js";
 
-export const repoConfigSchema = z.object({
-  alias: z.string().min(1),
-  baseCheckout: z.string().min(1),
-  defaultBranch: z.string().min(1).default("main"),
-  branchProtected: z.boolean().default(true),
-  verifyCommands: z.array(z.string().min(1)).default([]),
-  defaultModelTier: modelTierSchema.default("standard")
-});
+export const repoConfigSchema = z
+  .object({
+    alias: z.string().min(1),
+    remoteUrl: z.string().min(1).optional(),
+    mirrorPath: z.string().min(1).optional(),
+    baseCheckout: z.string().min(1).optional(),
+    defaultBranch: z.string().min(1).default("main"),
+    branchProtected: z.boolean().default(true),
+    verifyCommands: z.array(z.string().min(1)).default([]),
+    defaultModelTier: modelTierSchema.default("standard")
+  })
+  .refine((repo) => repo.remoteUrl || repo.baseCheckout, {
+    message: "repo config requires remoteUrl or baseCheckout"
+  });
 export type RepoConfig = z.infer<typeof repoConfigSchema>;
 
 const repoRegistrySchema = z.object({

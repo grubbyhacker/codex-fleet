@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   delegateTaskRequestSchema,
@@ -25,6 +26,7 @@ import { CleanupManager } from "./cleanup/cleanup-manager.js";
 import { resolveGitExecutable } from "./git.js";
 import type { FleetPaths } from "./paths.js";
 import { RepoRegistry } from "./registry/repo-registry.js";
+import { RepoSourceManager } from "./registry/repo-source-manager.js";
 import type { ClientRecord } from "./rpc/auth.js";
 import { FleetError } from "./rpc/errors.js";
 import { EventLog } from "./store/event-log.js";
@@ -36,7 +38,7 @@ import {
 } from "./store/state.js";
 import { WorkerRunError, type WorkerBackend } from "./workers/backend.js";
 import { workerBackendFromEnv } from "./workers/codex-backend.js";
-import { resolveFreshDefaultStartPoint, WorktreeManager } from "./worktree/worktree-manager.js";
+import { WorktreeManager } from "./worktree/worktree-manager.js";
 
 type WorktreePostRunStatus = {
   worktreePath: string;
@@ -56,8 +58,9 @@ export class FleetService {
   private readonly eventLog: EventLog;
   private readonly state: FleetState;
   private readonly registry: RepoRegistry;
+  private readonly repoSources: RepoSourceManager;
   private readonly worktrees: WorktreeManager;
-  private readonly cleanup = new CleanupManager();
+  private readonly cleanup: CleanupManager;
   private nextSeq: number;
   private readonly sessions = new Map<string, OwnerSession>();
 
@@ -70,7 +73,9 @@ export class FleetService {
     const events = this.eventLog.readAll();
     this.state = FleetState.replay(events);
     this.registry = RepoRegistry.load(paths);
+    this.repoSources = new RepoSourceManager(paths);
     this.worktrees = new WorktreeManager(paths);
+    this.cleanup = new CleanupManager(paths);
     this.nextSeq = events.reduce((max, event) => Math.max(max, event.seq), -1) + 1;
   }
 
@@ -159,6 +164,7 @@ export class FleetService {
     let repoBaseCheckout: string | undefined;
     let branch: string | undefined;
     let worktreePath: string | undefined;
+    let shellPath: string | undefined;
 
     if ("repo" in request.target) {
       const repo = this.registry.get(request.target.repo);
@@ -171,15 +177,26 @@ export class FleetService {
       }
       defaultModelTier = repo.defaultModelTier;
       repoForWorktree = repo;
-      repoBaseCheckout = repo.baseCheckout;
     }
 
     const modelRouting = routeModelTier(request, defaultModelTier);
 
-    if (repoForWorktree && request.deliveryMode !== "research_only") {
-      const resource = this.worktrees.create(repoForWorktree, taskId);
-      branch = resource.branch;
-      worktreePath = resource.worktreePath;
+    if (repoForWorktree) {
+      const source =
+        request.deliveryMode === "research_only" && !repoForWorktree.remoteUrl
+          ? undefined
+          : this.repoSources.prepare(repoForWorktree);
+      if (source) {
+        const resource = this.worktrees.create(repoForWorktree, taskId, source, {
+          branch: request.deliveryMode !== "research_only"
+        });
+        branch = resource.branch;
+        worktreePath = resource.worktreePath;
+      } else {
+        repoBaseCheckout = repoForWorktree.baseCheckout;
+      }
+    } else if ("shell" in request.target) {
+      shellPath = allocateShellPath(this.paths, taskId);
     }
 
     this.append("task_created", taskId, {
@@ -199,14 +216,14 @@ export class FleetService {
     ) {
       this.append("model_routing", taskId, modelRouting);
     }
-    if (branch || worktreePath) {
-      this.append("task_resource", taskId, { branch, worktreePath });
+    if (branch || worktreePath || shellPath) {
+      this.append("task_resource", taskId, { branch, worktreePath, shellPath });
     }
     this.append("task_state", taskId, {
       state: "running",
       lastActivityAt: createdAt
     } satisfies TaskStatePayload);
-    void this.runWorker({ taskId, request, repoBaseCheckout, branch, worktreePath });
+    void this.runWorker({ taskId, request, repoBaseCheckout, branch, worktreePath, shellPath });
 
     return { taskId };
   }
@@ -234,11 +251,17 @@ export class FleetService {
       state: "running",
       lastActivityAt: now
     } satisfies TaskStatePayload);
+    const repoBaseCheckout =
+      "repo" in task.target && !task.worktreePath
+        ? this.registry.get(task.target.repo)?.baseCheckout
+        : undefined;
     void this.runWorker({
       taskId: task.id,
       request,
+      repoBaseCheckout,
       branch: task.branch,
       worktreePath: task.worktreePath,
+      shellPath: task.shellPath,
       codexThreadId: task.codexThreadId
     });
 
@@ -303,7 +326,7 @@ export class FleetService {
     }
 
     const repo = this.registry.get(input.request.target.repo);
-    const baseRef = repo ? resolveFreshDefaultStartPoint(repo) : undefined;
+    const baseRef = repo ? this.repoSources.prepare(repo).startPoint : undefined;
     const baseBranch = displayBaseRef(baseRef);
     const status: WorktreePostRunStatus = {
       worktreePath: input.worktreePath,
@@ -453,6 +476,12 @@ function compactTaskSnapshot(task: TaskSnapshot): TaskSnapshot {
 
 function targetMatches(task: TaskSnapshot, targetId: string): boolean {
   return "repo" in task.target ? task.target.repo === targetId : targetId === "shell";
+}
+
+function allocateShellPath(paths: FleetPaths, taskId: string): string {
+  const shellPath = join(paths.shellDir, taskId.slice(0, 8));
+  mkdirSync(shellPath, { mode: 0o700, recursive: true });
+  return shellPath;
 }
 
 function gitOutput(cwd: string, args: string[]): string {

@@ -62,6 +62,10 @@ export function ensureStateLayout(paths: FleetPaths): void {
   chmodSync(paths.rootDir, 0o700);
   mkdirSync(paths.clientsDir, { mode: 0o700, recursive: true });
   chmodSync(paths.clientsDir, 0o700);
+  mkdirSync(paths.reposDir, { mode: 0o700, recursive: true });
+  chmodSync(paths.reposDir, 0o700);
+  mkdirSync(paths.shellDir, { mode: 0o700, recursive: true });
+  chmodSync(paths.shellDir, 0o700);
   mkdirSync(paths.tasksDir, { mode: 0o700, recursive: true });
   chmodSync(paths.tasksDir, 0o700);
   mkdirSync(paths.worktreesDir, { mode: 0o700, recursive: true });

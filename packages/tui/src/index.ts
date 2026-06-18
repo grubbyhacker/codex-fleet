@@ -160,6 +160,9 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
     if (selected.worktreePath) {
       rightLines.push(`Worktree: ${selected.worktreePath}`);
     }
+    if (selected.shellPath) {
+      rightLines.push(`Shell cwd: ${selected.shellPath}`);
+    }
     if (selected.branch) {
       rightLines.push(`Branch:   ${selected.branch}`);
     }

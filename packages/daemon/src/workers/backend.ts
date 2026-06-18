@@ -10,6 +10,7 @@ export type WorkerInput = {
   request: DelegateTaskRequest;
   repoBaseCheckout?: string;
   worktreePath?: string;
+  shellPath?: string;
   branch?: string;
   codexThreadId?: string;
   onActivity?: (activity: WorkerActivity) => void;

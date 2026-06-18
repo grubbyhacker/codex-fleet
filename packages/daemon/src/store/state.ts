@@ -27,6 +27,7 @@ export type TaskStatePayload = {
 export type TaskResourcePayload = {
   branch?: string;
   worktreePath?: string;
+  shellPath?: string;
 };
 
 export type TaskActivityPayload = {
@@ -98,7 +99,8 @@ export class FleetState {
         ...existing,
         updatedAt: event.ts,
         branch: payload.branch,
-        worktreePath: payload.worktreePath
+        worktreePath: payload.worktreePath,
+        shellPath: payload.shellPath
       });
       return;
     }

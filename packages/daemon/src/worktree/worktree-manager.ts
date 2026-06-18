@@ -2,64 +2,39 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { resolveGitExecutable } from "../git.js";
 import type { FleetPaths } from "../paths.js";
 import type { RepoConfig } from "../registry/repo-registry.js";
-import { resolveGitExecutable } from "../git.js";
+import type { RepoSource } from "../registry/repo-source-manager.js";
 
 export type WorktreeResource = {
-  branch: string;
+  branch?: string;
   worktreePath: string;
 };
 
 export class WorktreeManager {
   constructor(private readonly paths: FleetPaths) {}
 
-  create(repo: RepoConfig, taskId: string): WorktreeResource {
+  create(
+    repo: RepoConfig,
+    taskId: string,
+    source: RepoSource,
+    options: { branch: boolean }
+  ): WorktreeResource {
     const taskShort = taskId.slice(0, 8);
     const repoWorktreesDir = join(this.paths.worktreesDir, repo.alias);
     mkdirSync(repoWorktreesDir, { mode: 0o700, recursive: true });
 
-    const branch = `fleet/${repo.alias}/${taskShort}`;
+    const branch = options.branch ? `fleet/${repo.alias}/${taskShort}` : undefined;
     const worktreePath = join(repoWorktreesDir, taskShort);
-    const startPoint = resolveFreshDefaultStartPoint(repo);
-    execFileSync(
-      resolveGitExecutable(),
-      ["worktree", "add", "-b", branch, worktreePath, startPoint],
-      {
-        cwd: repo.baseCheckout,
-        stdio: "ignore"
-      }
-    );
-
-    return { branch, worktreePath };
-  }
-}
-
-export function resolveFreshDefaultStartPoint(repo: RepoConfig): string {
-  if (!hasOriginRemote(repo)) {
-    return repo.defaultBranch;
-  }
-
-  const remoteRef = `refs/remotes/origin/${repo.defaultBranch}`;
-  execFileSync(
-    resolveGitExecutable(),
-    ["fetch", "--prune", "origin", `+refs/heads/${repo.defaultBranch}:${remoteRef}`],
-    {
-      cwd: repo.baseCheckout,
-      stdio: "ignore"
-    }
-  );
-  return remoteRef;
-}
-
-function hasOriginRemote(repo: RepoConfig): boolean {
-  try {
-    execFileSync(resolveGitExecutable(), ["remote", "get-url", "origin"], {
-      cwd: repo.baseCheckout,
+    const args = branch
+      ? ["worktree", "add", "-b", branch, worktreePath, source.startPoint]
+      : ["worktree", "add", "--detach", worktreePath, source.startPoint];
+    execFileSync(resolveGitExecutable(), args, {
+      cwd: source.ownerPath,
       stdio: "ignore"
     });
-    return true;
-  } catch {
-    return false;
+
+    return { branch, worktreePath };
   }
 }

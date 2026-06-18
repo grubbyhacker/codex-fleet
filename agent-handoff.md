@@ -353,3 +353,21 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - If prompt-only guidance is not enough, add daemon-side policy to reject shell `push_to_main` and possibly shell repo-mutation prompts.
+
+## 2026-06-18 Fleet-Owned Sources
+
+### Did
+
+- Added and accepted `DCR-0001` for Fleet-owned repo mirrors and per-task shell scratch workspaces.
+- Implemented `remoteUrl` repo registry support with Fleet-owned bare mirrors in `~/.codex-fleet/repos/<alias>.git`.
+- Repo tasks with `remoteUrl` now create worktrees from Fleet mirrors; `research_only` remote repo tasks get detached Fleet-owned worktrees.
+- Shell workers now run from per-task scratch directories in `~/.codex-fleet/shell/<taskShort>`, and `end_task` removes those scratch dirs.
+- Kept `baseCheckout` as a compatibility path for private/local development configs.
+- Updated the productionization registry example to use `remoteUrl` instead of Roger-specific local checkout paths.
+- Migrated live `~/.codex-fleet/repos.json` from local `baseCheckout` paths to GitHub `remoteUrl` entries.
+- Added integration coverage for mirror-backed worktrees, detached remote research worktrees, shell scratch cleanup, and shell worker cwd instructions.
+- Left `docs/DESIGN.md` unchanged per agent rules.
+
+### Next
+
+- Decide whether to hard-reject shell delivery modes that imply repo mutation before worker launch.

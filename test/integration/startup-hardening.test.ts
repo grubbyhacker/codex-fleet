@@ -29,6 +29,8 @@ describe("daemon startup hardening", () => {
     const daemon = await startDaemon(paths);
     try {
       expect(statSync(paths.rootDir).mode & 0o777).toBe(0o700);
+      expect(statSync(paths.reposDir).mode & 0o777).toBe(0o700);
+      expect(statSync(paths.shellDir).mode & 0o777).toBe(0o700);
       expect(existsSync(paths.socketPath)).toBe(true);
     } finally {
       await daemon.close().catch(() => undefined);

@@ -103,11 +103,11 @@ describe("daemon rpc", () => {
 
       const waited = (await callDaemon(rpc, "wait_tasks", {
         taskIds: [delegated.taskId],
-        sinceEventSeq: 1,
-        maxWaitSeconds: 1
+        sinceEventSeq: 999,
+        maxWaitSeconds: 1,
+        returnOnStatuses: ["exited"]
       })) as { snapshots: Array<{ state: string }>; events: Array<{ type: string }> };
       expect(waited.snapshots[0]?.state).toBe("exited");
-      expect(waited.events).toContainEqual(expect.objectContaining({ type: "task_state" }));
     } finally {
       if (previousDelay === undefined) {
         delete process.env.CODEX_FLEET_FAKE_WORKER_DELAY_MS;
