@@ -294,3 +294,18 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - Relaunch any already-running TUI process to pick up the newly installed binary.
+
+## 2026-06-18 TUI Workflow Overhaul
+
+### Did
+
+- Reframed the dashboard around operator workflow: `Live`, `Action Queue`, `Stale`, and `Recent Results`/`Terminal History`.
+- Stale tasks are no longer treated as live work; old stale tasks age out by default and remain available with `--all` or direct task selection.
+- Renamed `Needs Attention` to `Action Queue` and kept it limited to terminal tasks with existing retained worktrees.
+- Reduced dashboard refresh load by fetching history only for the currently selected task instead of every task on each refresh.
+- Added regression coverage for hidden stale noise, fresh stale visibility, and retained-worktree action items.
+- Rebuilt/installed standalone binaries and verified aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Persist sanitized Codex activity events for a real per-agent transcript pane.

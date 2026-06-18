@@ -39,7 +39,7 @@ describe("tui dashboard", () => {
     }
   });
 
-  it("puts active work first and hides old terminal noise by default", () => {
+  it("puts live work first and hides old terminal and stale noise by default", () => {
     const now = "2026-06-18T18:00:00.000Z";
     const rendered = renderDashboard(
       {
@@ -60,6 +60,13 @@ describe("tui dashboard", () => {
             lastActivityAt: "2026-06-18T17:55:00.000Z"
           }),
           task({
+            id: "old-stale-task",
+            state: "stale",
+            createdAt: "2026-06-18T09:55:00.000Z",
+            updatedAt: "2026-06-18T10:00:00.000Z",
+            lastActivityAt: "2026-06-18T09:55:00.000Z"
+          }),
+          task({
             id: "fresh-terminal-task",
             state: "exited",
             createdAt: "2026-06-18T17:50:00.000Z",
@@ -70,13 +77,40 @@ describe("tui dashboard", () => {
       { color: false }
     );
 
-    expect(rendered).toContain("ACTIVE 1");
-    expect(rendered).toContain("hidden-old 1");
-    expect(rendered).toContain("1 older terminal task hidden");
+    expect(rendered).toContain("LIVE 1");
+    expect(rendered).toContain("stale 1");
+    expect(rendered).toContain("hidden-old 2");
+    expect(rendered).toContain("2 older tasks hidden");
     expect(rendered).toContain("active-task-id");
     expect(rendered).toContain("fresh-te");
     expect(rendered).not.toContain("old-terminal-task");
+    expect(rendered).not.toContain("old-stale-task");
     expect(rendered.indexOf("active-t")).toBeLessThan(rendered.indexOf("fresh-te"));
+  });
+
+  it("shows fresh stale work outside the live section", () => {
+    const rendered = renderDashboard(
+      {
+        collectedAt: "2026-06-18T18:00:00.000Z",
+        histories: {},
+        tasks: [
+          task({
+            id: "fresh-stale-task",
+            state: "stale",
+            createdAt: "2026-06-18T17:45:00.000Z",
+            updatedAt: "2026-06-18T17:55:00.000Z",
+            lastActivityAt: "2026-06-18T17:45:00.000Z"
+          })
+        ]
+      },
+      { color: false }
+    );
+
+    expect(rendered).toContain("LIVE 0");
+    expect(rendered).toContain("stale 1");
+    expect(rendered).toContain("Stale");
+    expect(rendered).toContain("fresh-s");
+    expect(rendered).toContain("quiet 15m ago");
   });
 
   it("promotes terminal tasks with retained worktrees as attention items", () => {
@@ -106,13 +140,13 @@ describe("tui dashboard", () => {
       );
 
       expect(rendered).toContain("attention 1");
-      expect(rendered).toContain("Needs Attention");
+      expect(rendered).toContain("Action Queue");
       expect(rendered).toContain("repo-wor");
       expect(rendered).toContain("needs worktree");
       expect(rendered).toContain("inspect: codex-fleet status repo-wor");
       expect(rendered).toContain(`diff: git -C '${worktreePath}' status --short`);
       expect(rendered).toContain("release: codex-fleet cleanup run --task repo-wor");
-      expect(rendered).toContain("1 older terminal task hidden");
+      expect(rendered).toContain("1 older task hidden");
     } finally {
       rmSync(worktreePath, { force: true, recursive: true });
     }
@@ -137,8 +171,8 @@ describe("tui dashboard", () => {
     );
 
     expect(rendered).toContain("attention 0");
-    expect(rendered).not.toContain("Needs Attention");
-    expect(rendered).toContain("1 older terminal task hidden");
+    expect(rendered).not.toContain("Action Queue");
+    expect(rendered).toContain("1 older task hidden");
   });
 
   it("does not promote terminal failures without retained worktrees as attention items", () => {
@@ -159,7 +193,7 @@ describe("tui dashboard", () => {
     );
 
     expect(rendered).toContain("attention 0");
-    expect(rendered).not.toContain("Needs Attention");
+    expect(rendered).not.toContain("Action Queue");
     expect(rendered).toContain("[FAILED_TO_START]");
     expect(rendered).toContain("failed_to_start");
   });
@@ -201,7 +235,7 @@ function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
 
 function task(overrides: {
   id: string;
-  state: "exited" | "failed_to_start" | "running";
+  state: "exited" | "failed_to_start" | "running" | "stale";
   createdAt: string;
   updatedAt: string;
   lastActivityAt?: string;

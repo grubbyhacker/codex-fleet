@@ -16,8 +16,9 @@ type DashboardOptions = {
 };
 
 const terminalStates = new Set<TaskState>(["exited", "failed_to_start", "cancelled", "timed_out"]);
-const activeStates = new Set<TaskState>(["queued", "running", "stale"]);
+const liveStates = new Set<TaskState>(["queued", "running"]);
 const freshTerminalWindowMs = 30 * 60 * 1_000;
+const freshStaleWindowMs = 10 * 60 * 1_000;
 const maxDefaultTerminalRows = 8;
 
 export function tuiProbe(): { ok: true; dashboard: "opentui" } {
@@ -30,22 +31,22 @@ export function renderDashboard(data: DashboardData, options: DashboardOptions =
   const visible = selectVisibleTasks(data.tasks, now, options);
   const selected = selectTask(data.tasks, visible.tasks, options.taskId);
   const summary = summarize(data.tasks);
-  const activeCount = data.tasks.filter((task) => activeStates.has(task.state)).length;
+  const liveCount = summary.queued + summary.running;
 
   lines.push(style("Codex Fleet", "title", options));
   lines.push(`Updated: ${data.collectedAt} (${formatAge(now, now)})`);
   lines.push(
     [
-      activeCount > 0
-        ? style(`ACTIVE ${activeCount}`, summary.stale > 0 ? "warn" : "active", options)
-        : style("ACTIVE 0", "dim", options),
+      liveCount > 0
+        ? style(`LIVE ${liveCount}`, "active", options)
+        : style("LIVE 0", "dim", options),
       summary.needsAttention > 0
         ? style(`attention ${summary.needsAttention}`, "warn", options)
         : `attention ${summary.needsAttention}`,
       `queued ${summary.queued}`,
       `running ${summary.running}`,
       summary.stale > 0
-        ? style(`stale ${summary.stale}`, "warn", options)
+        ? style(`stale ${summary.stale}`, visible.stale.length > 0 ? "warn" : "dim", options)
         : `stale ${summary.stale}`,
       `exited ${summary.exited}`,
       `cleanup-pending ${summary.cleanupPending}`
@@ -55,7 +56,9 @@ export function renderDashboard(data: DashboardData, options: DashboardOptions =
     [
       `tasks ${data.tasks.length}`,
       `visible ${visible.tasks.length}`,
-      visible.hiddenTerminal > 0 ? `hidden-old ${visible.hiddenTerminal}` : undefined,
+      visible.hiddenTerminal + visible.hiddenStale > 0
+        ? `hidden-old ${visible.hiddenTerminal + visible.hiddenStale}`
+        : undefined,
       `repos ${summary.reposTouched}`,
       `median-runtime ${summary.medianRuntime}`,
       `longest-runtime ${summary.longestRuntime}`
@@ -65,18 +68,18 @@ export function renderDashboard(data: DashboardData, options: DashboardOptions =
   );
   lines.push("");
 
-  if (visible.active.length > 0) {
-    lines.push(style("Active", "section", options));
-    for (const task of visible.active) {
+  if (visible.live.length > 0) {
+    lines.push(style("Live", "section", options));
+    for (const task of visible.live) {
       lines.push(formatTaskRow(task, now, options));
     }
   } else {
-    lines.push(`${style("Active", "section", options)}  ${style("none", "dim", options)}`);
+    lines.push(`${style("Live", "section", options)}  ${style("none", "dim", options)}`);
   }
 
   if (visible.needsAttention.length > 0) {
     lines.push("");
-    lines.push(style("Needs Attention", "warn", options));
+    lines.push(style("Action Queue", "warn", options));
     for (const task of visible.needsAttention) {
       lines.push(formatTaskRow(task, now, options));
       for (const action of attentionActions(task)) {
@@ -85,19 +88,28 @@ export function renderDashboard(data: DashboardData, options: DashboardOptions =
     }
   }
 
+  if (visible.stale.length > 0) {
+    lines.push("");
+    lines.push(style("Stale", "warn", options));
+    for (const task of visible.stale) {
+      lines.push(formatTaskRow(task, now, options));
+    }
+  }
+
   if (visible.terminal.length > 0) {
     lines.push("");
-    lines.push(style(options.showAll ? "Terminal" : "Fresh Terminal", "section", options));
+    lines.push(style(options.showAll ? "Terminal History" : "Recent Results", "section", options));
     for (const task of visible.terminal) {
       lines.push(formatTaskRow(task, now, options));
     }
   }
 
-  if (visible.hiddenTerminal > 0) {
+  if (visible.hiddenTerminal + visible.hiddenStale > 0) {
     lines.push("");
+    const hidden = visible.hiddenTerminal + visible.hiddenStale;
     lines.push(
       style(
-        `${visible.hiddenTerminal} older terminal task${visible.hiddenTerminal === 1 ? "" : "s"} hidden; use --all to show them.`,
+        `${hidden} older task${hidden === 1 ? "" : "s"} hidden; use --all to show them.`,
         "dim",
         options
       )
@@ -116,7 +128,7 @@ export function renderDashboard(data: DashboardData, options: DashboardOptions =
     lines.push(
       `  Updated:  ${selected.updatedAt} (${formatAge(Date.parse(selected.updatedAt), now)} ago)`
     );
-    if (activeStates.has(selected.state)) {
+    if (liveStates.has(selected.state) || selected.state === "stale") {
       lines.push(`  Quiet:    ${formatQuiet(selected, now)}`);
     }
     if (selected.worktreePath) {
@@ -149,7 +161,7 @@ if (import.meta.main) {
   if (process.argv.includes("--probe")) {
     console.log(JSON.stringify(tuiProbe()));
   } else if (process.argv.includes("--once")) {
-    const data = await loadDashboardData();
+    const data = await loadDashboardData(parseOptions());
     if (process.argv.includes("--json")) {
       console.log(
         JSON.stringify({ ...data, rendered: renderDashboard(data, parseOptions()) }, null, 2)
@@ -179,10 +191,8 @@ async function runDashboard(): Promise<void> {
 
   const refresh = async () => {
     try {
-      text.content = renderDashboard(await loadDashboardData(), {
-        ...parseOptions(),
-        color: false
-      });
+      const options = { ...parseOptions(), color: false };
+      text.content = renderDashboard(await loadDashboardData(options), options);
     } catch (error) {
       text.content = `Codex Fleet\n${error instanceof Error ? error.message : String(error)}\n`;
     }
@@ -193,20 +203,24 @@ async function runDashboard(): Promise<void> {
   renderer.on("destroy", () => clearInterval(timer));
 }
 
-async function loadDashboardData(): Promise<DashboardData> {
+async function loadDashboardData(options: DashboardOptions = {}): Promise<DashboardData> {
   const rpc = loadRpcOptions();
   const listed = (await callDaemon(rpc, "list_tasks", {})) as { tasks: TaskSnapshot[] };
   const histories: Record<string, Event[]> = {};
-  await Promise.all(
-    listed.tasks.map(async (task) => {
-      const result = (await callDaemon(rpc, "get_task_history", {
-        taskId: task.id,
-        limit: 8
-      })) as { events: Event[] };
-      histories[task.id] = result.events;
-    })
+  const collectedAt = new Date().toISOString();
+  const selected = selectTask(
+    listed.tasks,
+    selectVisibleTasks(listed.tasks, Date.parse(collectedAt), options).tasks,
+    options.taskId
   );
-  return { tasks: listed.tasks, histories, collectedAt: new Date().toISOString() };
+  if (selected) {
+    const result = (await callDaemon(rpc, "get_task_history", {
+      taskId: selected.id,
+      limit: 8
+    })) as { events: Event[] };
+    histories[selected.id] = result.events;
+  }
+  return { tasks: listed.tasks, histories, collectedAt };
 }
 
 function loadRpcOptions(): { socketPath: string; clientId: string; token: string } {
@@ -289,43 +303,54 @@ function selectVisibleTasks(
   options: DashboardOptions
 ): {
   tasks: TaskSnapshot[];
-  active: TaskSnapshot[];
+  live: TaskSnapshot[];
   terminal: TaskSnapshot[];
   needsAttention: TaskSnapshot[];
+  stale: TaskSnapshot[];
   hiddenTerminal: number;
+  hiddenStale: number;
 } {
   const active = tasks
-    .filter((task) => activeStates.has(task.state))
+    .filter((task) => liveStates.has(task.state))
     .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+  const stale = tasks
+    .filter((task) => task.state === "stale")
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
   const terminal = tasks
     .filter((task) => terminalStates.has(task.state))
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
   const attention = terminal.filter(needsAttention);
   const ordinaryTerminal = terminal.filter((task) => !needsAttention(task));
+  const visibleStale = options.showAll
+    ? stale
+    : stale.filter((task) => now - Date.parse(task.updatedAt) <= freshStaleWindowMs);
   const visibleTerminal = options.showAll
     ? ordinaryTerminal
     : ordinaryTerminal
         .filter((task) => now - Date.parse(task.updatedAt) <= freshTerminalWindowMs)
         .slice(0, maxDefaultTerminalRows);
   return {
-    tasks: [...active, ...attention, ...visibleTerminal],
-    active,
+    tasks: [...active, ...attention, ...visibleStale, ...visibleTerminal],
+    live: active,
     needsAttention: attention,
+    stale: visibleStale,
     terminal: visibleTerminal,
-    hiddenTerminal: ordinaryTerminal.length - visibleTerminal.length
+    hiddenTerminal: ordinaryTerminal.length - visibleTerminal.length,
+    hiddenStale: stale.length - visibleStale.length
   };
 }
 
 function formatTaskRow(task: TaskSnapshot, now: number, options: DashboardOptions): string {
-  const prefix = activeStates.has(task.state) ? ">>" : needsAttention(task) ? "!!" : "  ";
+  const prefix = liveStates.has(task.state) ? ">>" : needsAttention(task) ? "!!" : "  ";
   const target = formatTarget(task).padEnd(16);
   const state = stateBadge(task, options).padEnd(options.color ? 26 : 16);
-  const age = activeStates.has(task.state)
+  const age = liveStates.has(task.state)
     ? `running ${formatAge(Date.parse(task.createdAt), now)}`
     : `updated ${formatAge(Date.parse(task.updatedAt), now)} ago`;
-  const quiet = activeStates.has(task.state)
-    ? `quiet ${formatQuiet(task, now)}`
-    : formatTerminalStatus(task);
+  const quiet =
+    liveStates.has(task.state) || task.state === "stale"
+      ? `quiet ${formatQuiet(task, now)}`
+      : formatTerminalStatus(task);
   return [prefix, task.id.slice(0, 8), state, target, formatSession(task), age, quiet]
     .filter(Boolean)
     .join("  ");
