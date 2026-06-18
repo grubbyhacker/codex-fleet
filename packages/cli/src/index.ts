@@ -272,14 +272,20 @@ function isTerminal(state: TaskSnapshot["state"]): boolean {
 export function renderLaunchAgentPlist(): string {
   const paths = resolveFleetPaths();
   const cliPath = fileURLToPath(import.meta.url);
-  const env = process.env.CODEX_FLEET_STATE_DIR
-    ? `
+  const envVars = launchAgentEnvironment();
+  const env =
+    envVars.length > 0
+      ? `
   <key>EnvironmentVariables</key>
   <dict>
-    <key>CODEX_FLEET_STATE_DIR</key>
-    <string>${escapePlist(process.env.CODEX_FLEET_STATE_DIR)}</string>
+${envVars
+  .map(
+    ([key, value]) => `    <key>${escapePlist(key)}</key>
+    <string>${escapePlist(value)}</string>`
+  )
+  .join("\n")}
   </dict>`
-    : "";
+      : "";
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -309,6 +315,20 @@ export function renderLaunchAgentPlist(): string {
 
 function launchAgentPath(): string {
   return join(homedir(), "Library", "LaunchAgents", "dev.codex-fleet.daemon.plist");
+}
+
+function launchAgentEnvironment(): Array<[string, string]> {
+  return [
+    "CODEX_FLEET_STATE_DIR",
+    "CODEX_FLEET_WORKER_BACKEND",
+    "CODEX_FLEET_CODEX_MODEL",
+    "CODEX_FLEET_CODEX_COMMAND",
+    "CODEX_FLEET_CODEX_TIMEOUT_MS",
+    "CODEX_FLEET_AVAILABLE_MODEL_TIERS"
+  ].flatMap((key) => {
+    const value = process.env[key];
+    return value ? [[key, value]] : [];
+  });
 }
 
 function escapePlist(value: string): string {
