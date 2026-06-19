@@ -178,7 +178,7 @@ describe("daemon rpc", () => {
     }
   });
 
-  it("keeps list_tasks compact while get_task returns retained output", async () => {
+  it("keeps list_tasks compact while get_task returns retained prompt and output", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-rpc-list-compact-"));
     const paths = resolveFleetPaths(root);
     const previousResponse = process.env.CODEX_FLEET_FAKE_WORKER_RESPONSE;
@@ -190,16 +190,19 @@ describe("daemon rpc", () => {
     const rpc = { socketPath: paths.socketPath, clientId: "orch", token: orchestrator.token };
 
     try {
+      const prompt = "large retained output prompt " + "details ".repeat(80);
       const delegated = (await callDaemon(rpc, "delegate_task", {
         target: { shell: true },
         deliveryMode: "research_only",
-        prompt: "large retained output"
+        prompt
       })) as { taskId: string };
       await waitUntilExited(rpc, delegated.taskId);
 
       const listed = (await callDaemon(rpc, "list_tasks", {})) as {
         tasks: Array<{
           id: string;
+          prompt?: string;
+          promptPreview?: string;
           finalResponse?: string;
           finalResponsePreview?: string;
           workerStderr?: string;
@@ -208,6 +211,8 @@ describe("daemon rpc", () => {
       };
       expect(listed.tasks).toContainEqual(expect.objectContaining({ id: delegated.taskId }));
       const listedTask = listed.tasks.find((task) => task.id === delegated.taskId);
+      expect(listedTask?.prompt).toBeUndefined();
+      expect(listedTask?.promptPreview).toBe(prompt.slice(0, 237) + "...");
       expect(listedTask?.finalResponse).toBeUndefined();
       expect(listedTask?.finalResponsePreview).toBeUndefined();
       expect(listedTask?.workerStderr).toBeUndefined();
@@ -230,8 +235,15 @@ describe("daemon rpc", () => {
       expect(future.tasks).toHaveLength(0);
 
       const detailed = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
-        task: { finalResponse?: string; workerStderr?: string };
+        task: {
+          prompt?: string;
+          promptPreview?: string;
+          finalResponse?: string;
+          workerStderr?: string;
+        };
       };
+      expect(detailed.task.prompt).toBe(prompt);
+      expect(detailed.task.promptPreview).toBe(prompt.slice(0, 237) + "...");
       expect(detailed.task.finalResponse).toBe(process.env.CODEX_FLEET_FAKE_WORKER_RESPONSE);
       expect(detailed.task.workerStderr).toBe(process.env.CODEX_FLEET_FAKE_WORKER_STDERR);
     } finally {
@@ -334,10 +346,17 @@ describe("daemon rpc", () => {
 
       const second = await waitUntilExited(rpc, delegated.taskId);
       expect(second.task.codexThreadId).toBe(first.task.codexThreadId);
+      expect(second.task.prompt).toBe("second turn");
+      expect(second.task.promptPreview).toBe("second turn");
       const history = (await callDaemon(rpc, "get_task_history", {
         taskId: delegated.taskId
-      })) as { events: Array<{ type: string }> };
-      expect(history.events).toContainEqual(expect.objectContaining({ type: "task_resumed" }));
+      })) as { events: Array<{ type: string; summary: string }> };
+      expect(history.events).toContainEqual(
+        expect.objectContaining({
+          type: "task_resumed",
+          summary: expect.stringContaining('"prompt":"second turn"')
+        })
+      );
     } finally {
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });
@@ -382,6 +401,8 @@ async function waitUntilExited(
   task: {
     state: string;
     codexThreadId?: string;
+    prompt?: string;
+    promptPreview?: string;
     finalResponse?: string;
     finalResponsePreview?: string;
     workerStderr?: string;
@@ -393,6 +414,8 @@ async function waitUntilExited(
       task: {
         state: string;
         codexThreadId?: string;
+        prompt?: string;
+        promptPreview?: string;
         finalResponse?: string;
         finalResponsePreview?: string;
         workerStderr?: string;
@@ -408,6 +431,8 @@ async function waitUntilExited(
     task: {
       state: string;
       codexThreadId?: string;
+      prompt?: string;
+      promptPreview?: string;
       finalResponse?: string;
       finalResponsePreview?: string;
       workerStderr?: string;

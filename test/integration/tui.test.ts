@@ -119,6 +119,7 @@ describe("tui dashboard", () => {
       state: "exited",
       createdAt: "2026-06-18T17:45:00.000Z",
       updatedAt: "2026-06-18T17:55:00.000Z",
+      prompt: "Explain the selected task prompt in detail.",
       finalResponse: "The full answer is visible in the activity pane.",
       workerStderr: "stderr diagnostic line"
     });
@@ -146,12 +147,38 @@ describe("tui dashboard", () => {
     expect(rendered).toContain("+ Selected");
     expect(rendered).toContain("+ Events");
     expect(rendered).toContain("Selected Task");
+    expect(rendered).toContain("Prompt");
+    expect(rendered).toContain("Explain the selected task prompt");
     expect(rendered).toContain("Final Response");
     expect(rendered).toContain("The full answer is visible");
     expect(rendered).toContain("Worker Stderr");
     expect(rendered).toContain("stderr diagnostic line");
     expect(rendered).toContain("task_activity");
     expect(rendered.indexOf("+ Events")).toBeGreaterThan(rendered.indexOf("+ Selected"));
+  });
+
+  it("can focus the selected pane on the retained prompt", () => {
+    const selected = task({
+      id: "prompt-task-id",
+      state: "running",
+      createdAt: "2026-06-18T17:45:00.000Z",
+      updatedAt: "2026-06-18T17:55:00.000Z",
+      lastActivityAt: "2026-06-18T17:55:00.000Z",
+      prompt: "Investigate the dashboard and report the exact worker prompt."
+    });
+    const rendered = renderDashboard(
+      {
+        collectedAt: "2026-06-18T18:00:00.000Z",
+        histories: {},
+        tasks: [selected]
+      },
+      { color: false, mode: "prompt", width: 120 }
+    );
+
+    expect(rendered).toContain("mode prompt");
+    expect(rendered).toContain("Prompt");
+    expect(rendered).toContain("Investigate the dashboard");
+    expect(rendered).not.toContain("No final response yet");
   });
 
   it("promotes terminal tasks with retained worktrees as attention items", () => {
@@ -281,6 +308,7 @@ function task(overrides: {
   updatedAt: string;
   lastActivityAt?: string;
   worktreePath?: string;
+  prompt?: string;
   finalResponse?: string;
   workerStderr?: string;
 }): TaskSnapshot {
@@ -293,6 +321,8 @@ function task(overrides: {
     id: overrides.id,
     lastActivityAt: overrides.lastActivityAt,
     ownerSession: { clientId: "orch" },
+    prompt: overrides.prompt,
+    promptPreview: overrides.prompt,
     risk: "low",
     state: overrides.state,
     target: { repo: "youknowme" },

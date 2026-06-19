@@ -103,6 +103,8 @@ export const taskSnapshotSchema = z.object({
   risk: riskSchema,
   state: taskStateSchema,
   ownerSession: ownerSessionSchema,
+  prompt: z.string().optional(),
+  promptPreview: z.string().optional(),
   branch: z.string().min(1).optional(),
   worktreePath: z.string().min(1).optional(),
   shellPath: z.string().min(1).optional(),

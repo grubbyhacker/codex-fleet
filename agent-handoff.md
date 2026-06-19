@@ -398,3 +398,19 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Next
 
 - If context-window failures continue, consider daemon-side prompt linting for obvious large-artifact rewrite requests.
+
+## 2026-06-18 Prompt Visibility And TUI Modes
+
+### Did
+
+- Added `DCR-0002` accepting full task prompt retention for the local single-operator v1.
+- `get_task` now returns retained `prompt`/`promptPreview`; `list_tasks` remains compact and omits full prompt bodies.
+- Resume prompts are retained in `task_resumed` history events and update the task's latest prompt fields.
+- Added TUI modes: `overview`, `prompt`, `result`, and `stderr`; live mode supports `o`, `p`, `r`, `s`, and tab cycling.
+- Restored live TUI color through OpenTUI `StyledText` chunks instead of raw ANSI escape bytes.
+- Added `--mode` and `--color` flags for deterministic one-shot views.
+- Rebuilt/installed standalone binaries, restarted the LaunchAgent daemon while idle, and verified aggregate `mise exec -- bun run check`.
+
+### Next
+
+- Add real task selection/navigation controls so multiple visible tasks can be inspected without relaunching with `--task`.

@@ -206,6 +206,7 @@ export class FleetService {
       resumeTaskId: request.resumeTaskId,
       modelTier: request.modelTier,
       actualModel: modelRouting.actualModel,
+      prompt: request.prompt,
       promptPreview: preview(request.prompt),
       ownerSession,
       createdAt
@@ -242,6 +243,7 @@ export class FleetService {
 
     const now = new Date().toISOString();
     this.append("task_resumed", task.id, {
+      prompt: request.prompt,
       promptPreview: preview(request.prompt),
       deliveryMode: request.deliveryMode,
       risk: request.risk,
@@ -465,10 +467,17 @@ function preview(value: string, maxLength = 240): string {
 }
 
 function compactTaskSnapshot(task: TaskSnapshot): TaskSnapshot {
-  const { finalResponse, finalResponsePreview, workerStderr, workerStderrPreview, ...compact } =
-    task;
+  const {
+    finalResponse,
+    finalResponsePreview,
+    prompt,
+    workerStderr,
+    workerStderrPreview,
+    ...compact
+  } = task;
   void finalResponse;
   void finalResponsePreview;
+  void prompt;
   void workerStderr;
   void workerStderrPreview;
   return compact;

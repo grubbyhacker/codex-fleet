@@ -9,8 +9,17 @@ import {
 export type TaskCreatedPayload = Omit<DelegateTaskRequest, "prompt"> & {
   ownerSession: OwnerSession;
   createdAt: string;
+  prompt?: string;
   promptPreview: string;
   actualModel: TaskSnapshot["actualModel"];
+};
+
+export type TaskResumedPayload = {
+  prompt?: string;
+  promptPreview: string;
+  deliveryMode: TaskSnapshot["deliveryMode"];
+  risk: TaskSnapshot["risk"];
+  requestedModel?: TaskSnapshot["requestedModel"];
 };
 
 export type TaskStatePayload = {
@@ -64,6 +73,8 @@ export class FleetState {
           risk: payload.risk,
           state: "queued",
           ownerSession: payload.ownerSession,
+          prompt: payload.prompt,
+          promptPreview: payload.promptPreview,
           requestedModel: payload.modelTier,
           actualModel: payload.actualModel
         })
@@ -73,6 +84,20 @@ export class FleetState {
 
     const existing = this.tasks.get(event.taskId);
     if (!existing) {
+      return;
+    }
+
+    if (event.type === "task_resumed") {
+      const payload = parsePayload<TaskResumedPayload>(event);
+      this.tasks.set(event.taskId, {
+        ...existing,
+        updatedAt: event.ts,
+        deliveryMode: payload.deliveryMode,
+        risk: payload.risk,
+        prompt: payload.prompt,
+        promptPreview: payload.promptPreview,
+        requestedModel: payload.requestedModel
+      });
       return;
     }
 

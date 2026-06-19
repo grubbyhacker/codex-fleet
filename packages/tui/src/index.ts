@@ -1,6 +1,13 @@
 import { callDaemon, readClientToken, resolveFleetPaths } from "@codex-fleet/daemon";
 import type { Event, TaskSnapshot, TaskState } from "@codex-fleet/shared";
-import { createCliRenderer, TextRenderable } from "@opentui/core";
+import {
+  createCliRenderer,
+  RGBA,
+  StyledText,
+  TextAttributes,
+  TextRenderable,
+  type TextChunk
+} from "@opentui/core";
 import { existsSync } from "node:fs";
 
 type DashboardData = {
@@ -13,9 +20,12 @@ type DashboardOptions = {
   taskId?: string;
   showAll?: boolean;
   color?: boolean;
+  mode?: DashboardMode;
   width?: number;
   height?: number;
 };
+
+type DashboardMode = "overview" | "prompt" | "result" | "stderr";
 
 type DashboardView = {
   headerLines: string[];
@@ -30,6 +40,12 @@ const freshTerminalWindowMs = 30 * 60 * 1_000;
 const freshStaleWindowMs = 10 * 60 * 1_000;
 const maxDefaultTerminalRows = 8;
 const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+const dashboardModes = [
+  "overview",
+  "prompt",
+  "result",
+  "stderr"
+] as const satisfies readonly DashboardMode[];
 
 export function tuiProbe(): { ok: true; dashboard: "opentui" } {
   return { ok: true, dashboard: "opentui" };
@@ -51,9 +67,18 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
   const selected = selectTask(data.tasks, visible.tasks, options.taskId);
   const summary = summarize(data.tasks);
   const liveCount = summary.queued + summary.running;
+  const mode = options.mode ?? "overview";
 
   headerLines.push(style("Codex Fleet", "title", options));
-  headerLines.push(`Updated: ${data.collectedAt} (${formatAge(now, now)})`);
+  headerLines.push(
+    [
+      `Updated: ${data.collectedAt} (${formatAge(now, now)})`,
+      `mode ${style(mode, "info", options)}`,
+      selected ? `selected ${selected.id.slice(0, 8)}` : undefined
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join(" | ")
+  );
   headerLines.push(
     [
       liveCount > 0
@@ -157,6 +182,7 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
         detailLines.push(`Status:   ${status}`);
       }
     }
+    detailLines.push(...selectedModeLines(selected, mode, options));
     if (needsAttention(selected)) {
       detailLines.push("");
       detailLines.push(style("Actions", "warn", options));
@@ -175,24 +201,6 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
     }
     if (selected.exitCode !== undefined) {
       detailLines.push(`Exit:     ${selected.exitCode}`);
-    }
-    if (selected.finalResponse || selected.finalResponsePreview) {
-      detailLines.push("");
-      detailLines.push(style("Final Response", "section", options));
-      detailLines.push(
-        ...previewBlock(selected.finalResponse ?? selected.finalResponsePreview ?? "", 10, 112)
-      );
-    } else if (liveStates.has(selected.state)) {
-      detailLines.push("");
-      detailLines.push(style("Activity", "section", options));
-      detailLines.push(style("No final response yet.", "dim", options));
-    }
-    if (selected.workerStderr || selected.workerStderrPreview) {
-      detailLines.push("");
-      detailLines.push(style("Worker Stderr", "warn", options));
-      detailLines.push(
-        ...previewBlock(selected.workerStderr ?? selected.workerStderrPreview ?? "", 6, 112)
-      );
     }
 
     const history = data.histories[selected.id] ?? [];
@@ -244,24 +252,52 @@ async function runDashboard(): Promise<void> {
   renderer.root.add(text);
   renderer.start();
 
+  let mode = parseOptions().mode ?? "overview";
   const refresh = async () => {
     try {
-      const options = { ...parseOptions(), color: false };
-      text.content = renderDashboard(await loadDashboardData(options), options);
+      const options = { ...parseOptions(), mode };
+      text.content = renderDashboardForOpenTui(await loadDashboardData(options), options);
     } catch (error) {
-      const options = { ...parseOptions(), color: false };
+      const options = parseOptions();
       const width = options.width ?? 120;
-      text.content = finalizeDashboardFrame(
+      const rendered = finalizeDashboardFrame(
         `Codex Fleet\n${error instanceof Error ? error.message : String(error)}`,
         width,
         options
       );
+      text.content = options.color ? ansiToStyledText(rendered) : rendered;
     }
   };
+
+  renderer.on("key", (data: Buffer) => {
+    const key = data.toString("utf8");
+    if (key === "o") {
+      mode = "overview";
+    } else if (key === "p") {
+      mode = "prompt";
+    } else if (key === "r") {
+      mode = "result";
+    } else if (key === "s") {
+      mode = "stderr";
+    } else if (key === "\t") {
+      mode = nextMode(mode);
+    } else {
+      return;
+    }
+    void refresh();
+  });
 
   await refresh();
   const timer = setInterval(() => void refresh(), 1_000);
   renderer.on("destroy", () => clearInterval(timer));
+}
+
+function renderDashboardForOpenTui(
+  data: DashboardData,
+  options: DashboardOptions
+): string | StyledText {
+  const rendered = renderDashboard(data, options);
+  return options.color ? ansiToStyledText(rendered) : rendered;
 }
 
 async function loadDashboardData(options: DashboardOptions = {}): Promise<DashboardData> {
@@ -301,16 +337,27 @@ function loadRpcOptions(): { socketPath: string; clientId: string; token: string
 
 function parseOptions(): DashboardOptions {
   const taskIndex = process.argv.indexOf("--task");
+  const modeIndex = process.argv.indexOf("--mode");
   return {
     taskId: taskIndex === -1 ? undefined : process.argv[taskIndex + 1],
     showAll: process.argv.includes("--all"),
     color:
       !process.argv.includes("--json") &&
       !process.argv.includes("--no-color") &&
-      process.env.NO_COLOR === undefined,
+      (process.argv.includes("--color") || process.env.NO_COLOR === undefined),
+    mode: modeIndex === -1 ? undefined : parseDashboardMode(process.argv[modeIndex + 1] ?? ""),
     width: process.stdout.columns ?? parseTerminalDimension(process.env.COLUMNS),
     height: process.stdout.rows ?? parseTerminalDimension(process.env.LINES)
   };
+}
+
+function parseDashboardMode(value: string): DashboardMode | undefined {
+  return dashboardModes.find((mode) => mode === value);
+}
+
+function nextMode(current: DashboardMode): DashboardMode {
+  const index = dashboardModes.indexOf(current);
+  return dashboardModes[(index + 1) % dashboardModes.length] ?? "overview";
 }
 
 function parseTerminalDimension(value: string | undefined): number | undefined {
@@ -401,6 +448,72 @@ function finalizeDashboardFrame(
   }
   return frame.join("\n");
 }
+
+function ansiToStyledText(value: string): StyledText {
+  const chunks: TextChunk[] = [];
+  const pattern = new RegExp(`${String.fromCharCode(27)}\\[([0-9;]*)m`, "g");
+  let cursor = 0;
+  let current: NativeTextStyle = {};
+  for (const match of value.matchAll(pattern)) {
+    if (match.index > cursor) {
+      chunks.push(textChunk(value.slice(cursor, match.index), current));
+    }
+    current = nativeStyleFromAnsi(match[1] ?? "", current);
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < value.length) {
+    chunks.push(textChunk(value.slice(cursor), current));
+  }
+  return new StyledText(chunks);
+}
+
+type NativeTextStyle = {
+  fg?: RGBA;
+  attributes?: number;
+};
+
+function textChunk(text: string, textStyle: NativeTextStyle): TextChunk {
+  return {
+    __isChunk: true,
+    text,
+    ...(textStyle.fg ? { fg: textStyle.fg } : {}),
+    ...(textStyle.attributes ? { attributes: textStyle.attributes } : {})
+  };
+}
+
+function nativeStyleFromAnsi(value: string, current: NativeTextStyle): NativeTextStyle {
+  const codes =
+    value.length === 0 ? [0] : value.split(";").map((code) => Number.parseInt(code, 10));
+  let next = { ...current };
+  for (const code of codes) {
+    if (code === 0 || !Number.isFinite(code)) {
+      next = {};
+    } else if (code === 1) {
+      next.attributes = (next.attributes ?? 0) | TextAttributes.BOLD;
+    } else if (code === 2) {
+      next.attributes = (next.attributes ?? 0) | TextAttributes.DIM;
+    } else if (code === 31) {
+      next.fg = ansiPalette.red;
+    } else if (code === 32) {
+      next.fg = ansiPalette.green;
+    } else if (code === 33) {
+      next.fg = ansiPalette.yellow;
+    } else if (code === 36) {
+      next.fg = ansiPalette.cyan;
+    } else if (code === 37) {
+      next.fg = ansiPalette.white;
+    }
+  }
+  return next;
+}
+
+const ansiPalette = {
+  cyan: RGBA.fromInts(80, 210, 225),
+  green: RGBA.fromInts(110, 210, 125),
+  red: RGBA.fromInts(235, 95, 95),
+  white: RGBA.fromInts(225, 230, 235),
+  yellow: RGBA.fromInts(235, 205, 95)
+};
 
 function renderHeader(lines: string[], width: number): string[] {
   return lines.map((line) => fitLine(line, width));
@@ -563,7 +676,7 @@ function selectVisibleTasks(
 function formatTaskRow(task: TaskSnapshot, now: number, options: DashboardOptions): string {
   const prefix = liveStates.has(task.state) ? ">>" : needsAttention(task) ? "!!" : "  ";
   const target = formatTarget(task).padEnd(16);
-  const state = stateBadge(task, options).padEnd(options.color ? 26 : 16);
+  const state = padVisible(stateBadge(task, options), 16);
   const age = liveStates.has(task.state)
     ? `running ${formatAge(Date.parse(task.createdAt), now)}`
     : `updated ${formatAge(Date.parse(task.updatedAt), now)} ago`;
@@ -582,6 +695,59 @@ function formatEventRow(event: Event, options: DashboardOptions): string {
     style(event.type.padEnd(14), eventStyle(event), options),
     oneLine(event.summary, 110)
   ].join(" ");
+}
+
+function selectedModeLines(
+  selected: TaskSnapshot,
+  mode: DashboardMode,
+  options: DashboardOptions
+): string[] {
+  const lines: string[] = [];
+  const prompt = selected.prompt ?? selected.promptPreview;
+  const finalResponse = selected.finalResponse ?? selected.finalResponsePreview;
+  const workerStderr = selected.workerStderr ?? selected.workerStderrPreview;
+
+  if (mode === "prompt") {
+    lines.push("");
+    lines.push(style("Prompt", "section", options));
+    lines.push(...previewBlock(prompt ?? "Prompt not retained for this task.", 18, 112));
+    return lines;
+  }
+
+  if (mode === "result") {
+    lines.push("");
+    lines.push(style("Final Response", "section", options));
+    lines.push(...previewBlock(finalResponse ?? "No final response yet.", 18, 112));
+    return lines;
+  }
+
+  if (mode === "stderr") {
+    lines.push("");
+    lines.push(style("Worker Stderr", workerStderr ? "warn" : "section", options));
+    lines.push(...previewBlock(workerStderr ?? "No worker stderr captured.", 18, 112));
+    return lines;
+  }
+
+  if (prompt) {
+    lines.push("");
+    lines.push(style("Prompt", "section", options));
+    lines.push(...previewBlock(prompt, 5, 112));
+  }
+  if (finalResponse) {
+    lines.push("");
+    lines.push(style("Final Response", "section", options));
+    lines.push(...previewBlock(finalResponse, 7, 112));
+  } else if (liveStates.has(selected.state)) {
+    lines.push("");
+    lines.push(style("Activity", "section", options));
+    lines.push(style("No final response yet.", "dim", options));
+  }
+  if (workerStderr) {
+    lines.push("");
+    lines.push(style("Worker Stderr", "warn", options));
+    lines.push(...previewBlock(workerStderr, 4, 112));
+  }
+  return lines;
 }
 
 function eventStyle(
