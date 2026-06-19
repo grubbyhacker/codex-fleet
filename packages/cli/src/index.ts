@@ -126,8 +126,15 @@ if (import.meta.main) {
     const force = args.includes("--force");
     const result = force
       ? await forceCleanup(taskId)
-      : await callDaemon(loadRpcOptions(), "end_task", { taskId });
+      : await callDaemon(loadRpcOptions(), "end_task", {
+          taskId: await resolveTaskIdOrPrefix(taskId)
+        });
     console.log(JSON.stringify(result, null, 2));
+  }
+
+  if (command === "cleanup" && subcommand === "wipe-clean") {
+    const dryRun = args.includes("--dry-run");
+    console.log(JSON.stringify(await wipeCleanActionQueue({ dryRun }), null, 2));
   }
 
   if (command === "service" && subcommand === "launch-agent") {
@@ -183,14 +190,23 @@ async function listCleanupCandidates(): Promise<{
   };
 }
 
+type ListedTask = TaskSnapshot & { id: string };
+
+async function listTerminalWorktreeTasks(): Promise<ListedTask[]> {
+  const result = (await callDaemon(loadRpcOptions(), "list_tasks", {})) as {
+    tasks: TaskSnapshot[];
+  };
+  return result.tasks
+    .filter((task): task is ListedTask => Boolean(task.id && task.worktreePath))
+    .filter((task) => isTerminal(task.state));
+}
+
 async function dryRunCleanup(taskId: string): Promise<{
   dryRun: true;
   taskId: string;
   candidate: CleanupCandidate;
 }> {
-  const result = (await callDaemon(loadRpcOptions(), "get_task", { taskId })) as {
-    task: TaskSnapshot;
-  };
+  const result = await getTaskByIdOrPrefix(taskId);
   if (!result.task.worktreePath) {
     throw new Error(`Task "${taskId}" has no worktree to clean`);
   }
@@ -199,6 +215,36 @@ async function dryRunCleanup(taskId: string): Promise<{
     taskId,
     candidate: classifyCleanupCandidate(result.task)
   };
+}
+
+async function wipeCleanActionQueue(options: { dryRun: boolean }): Promise<{
+  dryRun: boolean;
+  targets: CleanupCandidate[];
+  wiped: Array<ForceCleanupResult & { candidate: CleanupCandidate }>;
+  skipped: CleanupCandidate[];
+}> {
+  const candidates = (await listTerminalWorktreeTasks()).map((task) =>
+    classifyCleanupCandidate(task)
+  );
+  const wipeTargets = candidates.filter((candidate) => candidate.status !== "already_removed");
+  if (options.dryRun) {
+    return {
+      dryRun: true,
+      skipped: candidates.filter(isAlreadyRemoved),
+      targets: wipeTargets,
+      wiped: []
+    };
+  }
+
+  const wiped: Array<ForceCleanupResult & { candidate: CleanupCandidate }> = [];
+  for (const candidate of wipeTargets) {
+    wiped.push({ ...(await forceCleanup(candidate.taskId)), candidate });
+  }
+  return { dryRun: false, skipped: candidates.filter(isAlreadyRemoved), targets: [], wiped };
+}
+
+function isAlreadyRemoved(candidate: CleanupCandidate): boolean {
+  return candidate.status === "already_removed";
 }
 
 type CleanupCandidate = {
@@ -238,14 +284,14 @@ function classifyCleanupCandidate(task: TaskSnapshot): CleanupCandidate {
   };
 }
 
-async function forceCleanup(taskId: string): Promise<{
+type ForceCleanupResult = {
   accepted: true;
   taskId: string;
   cleanup: { cleaned: boolean; forced: true; branchDeleted: boolean };
-}> {
-  const result = (await callDaemon(loadRpcOptions(), "get_task", { taskId })) as {
-    task: TaskSnapshot;
-  };
+};
+
+async function forceCleanup(taskId: string): Promise<ForceCleanupResult> {
+  const result = await getTaskByIdOrPrefix(taskId);
   const task = result.task;
   if (!task.worktreePath) {
     throw new Error(`Task "${taskId}" has no worktree to clean`);
@@ -260,8 +306,35 @@ async function forceCleanup(taskId: string): Promise<{
     stdio: "ignore"
   });
   execFileSync(git, ["worktree", "prune"], { cwd: repo.baseCheckout, stdio: "ignore" });
-  const branchDeleted = task.branch ? deleteBranchIfMerged(repo.baseCheckout, task.branch) : false;
+  const branchDeleted = task.branch ? deleteBranch(repo.baseCheckout, task.branch, true) : false;
   return { accepted: true, taskId, cleanup: { cleaned: true, forced: true, branchDeleted } };
+}
+
+async function getTaskByIdOrPrefix(taskId: string): Promise<{ task: TaskSnapshot }> {
+  return (await callDaemon(loadRpcOptions(), "get_task", {
+    taskId: await resolveTaskIdOrPrefix(taskId)
+  })) as {
+    task: TaskSnapshot;
+  };
+}
+
+async function resolveTaskIdOrPrefix(taskId: string): Promise<string> {
+  try {
+    await callDaemon(loadRpcOptions(), "get_task", { taskId });
+    return taskId;
+  } catch {
+    const matches = (await listTerminalWorktreeTasks()).filter((task) =>
+      task.id.startsWith(taskId)
+    );
+    const match = matches[0];
+    if (matches.length === 1 && match) {
+      return match.id;
+    }
+    if (matches.length > 1) {
+      throw new Error(`Task id prefix "${taskId}" is ambiguous`);
+    }
+    return taskId;
+  }
 }
 
 function loadRepoOwnerPath(
@@ -299,9 +372,9 @@ function dirtyFileCount(worktreePath: string): number {
     .filter(Boolean).length;
 }
 
-function deleteBranchIfMerged(baseCheckout: string, branch: string): boolean {
+function deleteBranch(baseCheckout: string, branch: string, force = false): boolean {
   try {
-    execFileSync(resolveGitExecutable(), ["branch", "-d", branch], {
+    execFileSync(resolveGitExecutable(), ["branch", force ? "-D" : "-d", branch], {
       cwd: baseCheckout,
       stdio: "ignore"
     });

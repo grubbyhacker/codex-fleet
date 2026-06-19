@@ -76,7 +76,7 @@ describe("cli views", () => {
       expect(runDryRun).toContain("cleanup_ready");
       expect(existsSync(cleanTask.worktreePath ?? "")).toBe(true);
 
-      await runCli(paths.rootDir, "cleanup", "run", "--task", clean.taskId);
+      await runCli(paths.rootDir, "cleanup", "run", "--task", clean.taskId.slice(0, 8));
       expect(existsSync(cleanTask.worktreePath ?? "")).toBe(false);
 
       const dirty = await delegatePatch(rpc);
@@ -89,6 +89,28 @@ describe("cli views", () => {
       await runCli(paths.rootDir, "cleanup", "run", "--task", dirty.taskId, "--force");
       expect(existsSync(dirtyTask.worktreePath ?? "")).toBe(false);
       expect(branchExists(repo, dirtyTask.branch ?? "")).toBe(false);
+
+      const wipeClean = await delegatePatch(rpc);
+      const wipeCleanTask = await getTask(rpc, wipeClean.taskId);
+      const wipeDirty = await delegatePatch(rpc);
+      const wipeDirtyTask = await getTask(rpc, wipeDirty.taskId);
+      writeFileSync(join(wipeDirtyTask.worktreePath ?? "", "discard-me.txt"), "discard me\n");
+
+      const wipeDryRun = await runCli(paths.rootDir, "cleanup", "wipe-clean", "--dry-run");
+      expect(wipeDryRun).toContain(wipeClean.taskId);
+      expect(wipeDryRun).toContain(wipeDirty.taskId);
+      expect(wipeDryRun).toContain("cleanup_blocked_dirty");
+      expect(existsSync(wipeCleanTask.worktreePath ?? "")).toBe(true);
+      expect(existsSync(wipeDirtyTask.worktreePath ?? "")).toBe(true);
+
+      const wipeResult = await runCli(paths.rootDir, "cleanup", "wipe-clean");
+      expect(wipeResult).toContain('"dryRun": false');
+      expect(wipeResult).toContain(wipeClean.taskId);
+      expect(wipeResult).toContain(wipeDirty.taskId);
+      expect(existsSync(wipeCleanTask.worktreePath ?? "")).toBe(false);
+      expect(existsSync(wipeDirtyTask.worktreePath ?? "")).toBe(false);
+      expect(branchExists(repo, wipeCleanTask.branch ?? "")).toBe(false);
+      expect(branchExists(repo, wipeDirtyTask.branch ?? "")).toBe(false);
     } finally {
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });

@@ -1,7 +1,7 @@
 import { callDaemon, readClientToken, resolveFleetPaths } from "@codex-fleet/daemon";
 import type { Event, TaskSnapshot, TaskState } from "@codex-fleet/shared";
 import {
-  createCliRenderer,
+  CliRenderer,
   RGBA,
   StyledText,
   TextAttributes,
@@ -9,11 +9,13 @@ import {
   type TextChunk
 } from "@opentui/core";
 import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 type DashboardData = {
   tasks: TaskSnapshot[];
   histories: Record<string, Event[]>;
   collectedAt: string;
+  codexUsage?: CodexUsageSummary;
 };
 
 type DashboardOptions = {
@@ -23,6 +25,7 @@ type DashboardOptions = {
   mode?: DashboardMode;
   width?: number;
   height?: number;
+  notice?: string;
 };
 
 type DashboardMode = "overview" | "prompt" | "result" | "stderr";
@@ -34,18 +37,54 @@ type DashboardView = {
   eventLines: string[];
 };
 
+type CodexUsageSummary = {
+  daily: number | undefined;
+  weekly: number | undefined;
+  monthly: number | undefined;
+  source: "local" | "unavailable";
+};
+
 const terminalStates = new Set<TaskState>(["exited", "failed_to_start", "cancelled", "timed_out"]);
 const liveStates = new Set<TaskState>(["queued", "running"]);
 const freshTerminalWindowMs = 30 * 60 * 1_000;
 const freshStaleWindowMs = 10 * 60 * 1_000;
 const maxDefaultTerminalRows = 8;
 const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+const localDateTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  month: "short",
+  second: "2-digit",
+  timeZoneName: "short",
+  year: "numeric"
+});
+const ansiPalette = {
+  cyan: RGBA.fromInts(80, 210, 225),
+  green: RGBA.fromInts(110, 210, 125),
+  red: RGBA.fromInts(235, 95, 95),
+  white: RGBA.fromInts(225, 230, 235),
+  yellow: RGBA.fromInts(235, 205, 95)
+};
 const dashboardModes = [
   "overview",
   "prompt",
   "result",
   "stderr"
 ] as const satisfies readonly DashboardMode[];
+const codexLogo = [
+  "   ___ ___  ___  _____  __ ",
+  "  / __/ _ \\|   \\| __\\ \\/ / ",
+  " | (_| (_) | |) | _| >  <  ",
+  "  \\___\\___/|___/|___/_/\\_\\ ",
+  "        CODEX FLEET        "
+] as const;
+let cachedCodexUsage:
+  | {
+      expiresAt: number;
+      summary: CodexUsageSummary;
+    }
+  | undefined;
 
 export function tuiProbe(): { ok: true; dashboard: "opentui" } {
   return { ok: true, dashboard: "opentui" };
@@ -72,7 +111,6 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
   headerLines.push(style("Codex Fleet", "title", options));
   headerLines.push(
     [
-      `Updated: ${data.collectedAt} (${formatAge(now, now)})`,
       `mode ${style(mode, "info", options)}`,
       selected ? `selected ${selected.id.slice(0, 8)}` : undefined
     ]
@@ -110,11 +148,26 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
       .filter((part): part is string => Boolean(part))
       .join(" | ")
   );
+  headerLines.push(`Codex tokens: ${formatCodexUsage(data.codexUsage)}`);
+  headerLines.push("NAV: j/k or arrows move   g/G first/last   Tab next pane");
+  headerLines.push("VIEW: o overview   p prompt   r result   s stderr   q quit");
+  headerLines.push("OPS: x wipe clean action queue");
+  if (options.notice) {
+    headerLines.push(style(options.notice, "warn", options));
+  }
+  headerLines.push(`updated ${formatLocalTimestamp(data.collectedAt)}`);
 
   if (visible.live.length > 0) {
     taskLines.push(style("Live", "section", options));
+    taskLines.push(style("  id        state       target          signal", "dim", options));
+    let previousSession = "";
     for (const task of visible.live) {
-      taskLines.push(formatTaskRow(task, now, options));
+      const session = formatSession(task);
+      if (session !== previousSession) {
+        taskLines.push(style(`session ${session}`, "info", options));
+        previousSession = session;
+      }
+      taskLines.push(formatTaskRow(task, now, options, task.id === selected?.id));
     }
   } else {
     taskLines.push(`${style("Live", "section", options)}  ${style("none", "dim", options)}`);
@@ -123,8 +176,14 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
   if (visible.needsAttention.length > 0) {
     taskLines.push("");
     taskLines.push(style("Action Queue", "warn", options));
+    let previousSession = "";
     for (const task of visible.needsAttention) {
-      taskLines.push(formatTaskRow(task, now, options));
+      const session = formatSession(task);
+      if (session !== previousSession) {
+        taskLines.push(style(`session ${session}`, "info", options));
+        previousSession = session;
+      }
+      taskLines.push(formatTaskRow(task, now, options, task.id === selected?.id));
       for (const action of attentionActions(task)) {
         taskLines.push(`    ${style(action, "dim", options)}`);
       }
@@ -134,8 +193,14 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
   if (visible.stale.length > 0) {
     taskLines.push("");
     taskLines.push(style("Stale", "warn", options));
+    let previousSession = "";
     for (const task of visible.stale) {
-      taskLines.push(formatTaskRow(task, now, options));
+      const session = formatSession(task);
+      if (session !== previousSession) {
+        taskLines.push(style(`session ${session}`, "info", options));
+        previousSession = session;
+      }
+      taskLines.push(formatTaskRow(task, now, options, task.id === selected?.id));
     }
   }
 
@@ -144,8 +209,14 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
     taskLines.push(
       style(options.showAll ? "Terminal History" : "Recent Results", "section", options)
     );
+    let previousSession = "";
     for (const task of visible.terminal) {
-      taskLines.push(formatTaskRow(task, now, options));
+      const session = formatSession(task);
+      if (session !== previousSession) {
+        taskLines.push(style(`session ${session}`, "info", options));
+        previousSession = session;
+      }
+      taskLines.push(formatTaskRow(task, now, options, task.id === selected?.id));
     }
   }
 
@@ -168,10 +239,10 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
     detailLines.push(`Session:  ${formatSession(selected)}`);
     detailLines.push(`State:    ${stateBadge(selected, options)}`);
     detailLines.push(
-      `Started:  ${selected.createdAt} (${formatAge(Date.parse(selected.createdAt), now)} ago)`
+      `Started:  ${formatLocalTimestamp(selected.createdAt)} (${formatAge(Date.parse(selected.createdAt), now)} ago)`
     );
     detailLines.push(
-      `Updated:  ${selected.updatedAt} (${formatAge(Date.parse(selected.updatedAt), now)} ago)`
+      `Updated:  ${formatLocalTimestamp(selected.updatedAt)} (${formatAge(Date.parse(selected.updatedAt), now)} ago)`
     );
     if (liveStates.has(selected.state) || selected.state === "stale") {
       detailLines.push(`Activity: quiet ${formatQuiet(selected, now)}`);
@@ -238,13 +309,42 @@ if (import.meta.main) {
 }
 
 async function runDashboard(): Promise<void> {
-  const renderer = await createCliRenderer({
-    clearOnShutdown: true,
-    exitOnCtrlC: true,
-    targetFps: 2
-  });
+  const renderer = new CliRenderer(
+    process.stdin,
+    process.stdout,
+    process.stdout.columns ?? 80,
+    process.stdout.rows ?? 24,
+    {
+      clearOnShutdown: false,
+      consoleMode: "disabled",
+      enableMouseMovement: false,
+      exitOnCtrlC: true,
+      openConsoleOnError: false,
+      targetFps: 2,
+      useKittyKeyboard: null,
+      useMouse: false
+    }
+  );
+  enterTerminalDashboard();
+  renderer.on("destroy", leaveTerminalDashboard);
+
+  let mode = parseOptions().mode ?? "overview";
+  let selectedTaskId = parseOptions().taskId;
+  let notice: string | undefined;
+  let lastData: DashboardData | undefined;
+  let initialContent: string | StyledText;
+  try {
+    const options = { ...parseOptions(), mode, notice, taskId: selectedTaskId };
+    const data = await loadDashboardData(options);
+    lastData = data;
+    selectedTaskId = selectedTask(data, options)?.id;
+    initialContent = renderDashboardForOpenTui(data, { ...options, taskId: selectedTaskId });
+  } catch (error) {
+    initialContent = renderDashboardError(error, parseOptions());
+  }
+
   const text = new TextRenderable(renderer, {
-    content: "Codex Fleet\nLoading...\n",
+    content: initialContent,
     width: "100%",
     height: "100%",
     wrapMode: "none"
@@ -252,44 +352,110 @@ async function runDashboard(): Promise<void> {
   renderer.root.add(text);
   renderer.start();
 
-  let mode = parseOptions().mode ?? "overview";
   const refresh = async () => {
     try {
-      const options = { ...parseOptions(), mode };
-      text.content = renderDashboardForOpenTui(await loadDashboardData(options), options);
+      const options = { ...parseOptions(), mode, notice, taskId: selectedTaskId };
+      const data = await loadDashboardData(options);
+      lastData = data;
+      selectedTaskId = selectedTask(data, options)?.id;
+      text.content = renderDashboardForOpenTui(data, { ...options, taskId: selectedTaskId });
     } catch (error) {
-      const options = parseOptions();
-      const width = options.width ?? 120;
-      const rendered = finalizeDashboardFrame(
-        `Codex Fleet\n${error instanceof Error ? error.message : String(error)}`,
-        width,
-        options
-      );
-      text.content = options.color ? ansiToStyledText(rendered) : rendered;
+      text.content = renderDashboardError(error, parseOptions());
     }
   };
 
-  renderer.on("key", (data: Buffer) => {
-    const key = data.toString("utf8");
-    if (key === "o") {
+  renderer.keyInput.on("keypress", (event) => {
+    if (event.name === "q" || (event.name === "c" && event.ctrl)) {
+      renderer.destroy();
+      return;
+    }
+    if (event.name === "j" || event.name === "down") {
+      selectedTaskId =
+        moveSelectedTask(lastData, selectedTaskId, 1, parseOptions()) ?? selectedTaskId;
+    } else if (event.name === "k" || event.name === "up") {
+      selectedTaskId =
+        moveSelectedTask(lastData, selectedTaskId, -1, parseOptions()) ?? selectedTaskId;
+    } else if (event.name === "g" && !event.shift) {
+      selectedTaskId = edgeSelectedTask(lastData, "first", parseOptions()) ?? selectedTaskId;
+    } else if (event.name === "g" && event.shift) {
+      selectedTaskId = edgeSelectedTask(lastData, "last", parseOptions()) ?? selectedTaskId;
+    } else if (event.name === "o") {
       mode = "overview";
-    } else if (key === "p") {
+    } else if (event.name === "p") {
       mode = "prompt";
-    } else if (key === "r") {
+    } else if (event.name === "r") {
       mode = "result";
-    } else if (key === "s") {
+    } else if (event.name === "s") {
       mode = "stderr";
-    } else if (key === "\t") {
+    } else if (event.name === "tab") {
       mode = nextMode(mode);
+    } else if (event.name === "x") {
+      notice = "wipe-clean running...";
+      void refresh();
+      void Promise.resolve()
+        .then(() => runWipeCleanActionQueue())
+        .then((message) => {
+          notice = message;
+        })
+        .catch((error: unknown) => {
+          notice = `wipe-clean failed: ${error instanceof Error ? error.message : String(error)}`;
+        })
+        .finally(() => void refresh());
     } else {
       return;
     }
+    event.preventDefault();
     void refresh();
   });
 
-  await refresh();
   const timer = setInterval(() => void refresh(), 1_000);
   renderer.on("destroy", () => clearInterval(timer));
+}
+
+function enterTerminalDashboard(): void {
+  process.stdout.write("\u001b[?1049h\u001b[?25l\u001b[H\u001b[2J");
+}
+
+function leaveTerminalDashboard(): void {
+  process.stdout.write("\u001b[?25h\u001b[?1049l");
+}
+
+function runWipeCleanActionQueue(): string {
+  if (process.argv.includes("--demo")) {
+    return "wipe-clean skipped in demo mode";
+  }
+  const proc = Bun.spawnSync([...cleanupCommand(), "cleanup", "wipe-clean"], {
+    env: { ...stringEnv(process.env), CODEX_FLEET_CLIENT_ID: "cli" },
+    stderr: "pipe",
+    stdout: "pipe"
+  });
+  const stderr = proc.stderr.toString().trim();
+  const stdout = proc.stdout.toString().trim();
+  if (proc.exitCode !== 0) {
+    throw new Error(stderr || stdout || `codex-fleet cleanup exited ${proc.exitCode}`);
+  }
+
+  const result = JSON.parse(stdout) as { wiped?: unknown[]; skipped?: unknown[] };
+  const wiped = result.wiped?.length ?? 0;
+  const skipped = result.skipped?.length ?? 0;
+  return `wipe-clean removed ${wiped} worktree${wiped === 1 ? "" : "s"}${skipped > 0 ? `; ${skipped} already gone` : ""}`;
+}
+
+function cleanupCommand(): string[] {
+  const invokedPath = process.argv[1];
+  if (invokedPath) {
+    const sibling = join(dirname(invokedPath), "codex-fleet");
+    if (existsSync(sibling)) {
+      return [sibling];
+    }
+  }
+  return ["codex-fleet"];
+}
+
+function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => Boolean(entry[1]))
+  );
 }
 
 function renderDashboardForOpenTui(
@@ -301,11 +467,14 @@ function renderDashboardForOpenTui(
 }
 
 async function loadDashboardData(options: DashboardOptions = {}): Promise<DashboardData> {
+  if (process.argv.includes("--demo")) {
+    return demoDashboardData(options);
+  }
   const rpc = loadRpcOptions();
   const listed = (await callDaemon(rpc, "list_tasks", {})) as { tasks: TaskSnapshot[] };
   let tasks = listed.tasks;
   const histories: Record<string, Event[]> = {};
-  const collectedAt = new Date().toISOString();
+  const [collectedAt, codexUsage] = [new Date().toISOString(), loadCodexUsage()];
   const selected = selectTask(
     tasks,
     selectVisibleTasks(tasks, Date.parse(collectedAt), options).tasks,
@@ -322,7 +491,259 @@ async function loadDashboardData(options: DashboardOptions = {}): Promise<Dashbo
     })) as { events: Event[] };
     histories[selected.id] = result.events;
   }
-  return { tasks, histories, collectedAt };
+  return { tasks, histories, collectedAt, codexUsage };
+}
+
+function selectedTask(data: DashboardData, options: DashboardOptions): TaskSnapshot | undefined {
+  return selectTask(
+    data.tasks,
+    selectVisibleTasks(data.tasks, Date.parse(data.collectedAt), options).tasks,
+    options.taskId
+  );
+}
+
+function renderDashboardError(error: unknown, options: DashboardOptions): string | StyledText {
+  const width = options.width ?? 120;
+  const rendered = finalizeDashboardFrame(
+    `Codex Fleet\n${error instanceof Error ? error.message : String(error)}`,
+    width,
+    options
+  );
+  return options.color ? ansiToStyledText(rendered) : rendered;
+}
+
+function demoDashboardData(options: DashboardOptions): DashboardData {
+  const collectedAt = new Date();
+  const iso = (minutesAgo: number) =>
+    new Date(collectedAt.getTime() - minutesAgo * 60_000).toISOString();
+  const tasks: TaskSnapshot[] = [
+    {
+      actualModel: "strong",
+      branch: "fleet/codex-fleet/ui-polish",
+      codexThreadId: "codex-demo-ui",
+      createdAt: iso(38),
+      deliveryMode: "patch",
+      finalResponsePreview: "Still running. Recent output says snapshot review is in progress.",
+      id: "demo-ui-polish-001",
+      lastActivityAt: iso(1),
+      ownerSession: { clientId: "orch", sessionName: "ui-polish" },
+      prompt:
+        "Make the Codex Fleet dashboard feel like an operator console I can trust during active work.",
+      promptPreview: "Make the Codex Fleet dashboard feel like an operator console...",
+      requestedModel: "strong",
+      risk: "standard",
+      state: "running",
+      target: { repo: "codex-fleet" },
+      updatedAt: iso(1),
+      worktreePath: "~/.codex-fleet/worktrees/codex-fleet/demo-ui-polish"
+    },
+    {
+      actualModel: "standard",
+      createdAt: iso(16),
+      deliveryMode: "research_only",
+      id: "demo-prod-diag-002",
+      lastActivityAt: iso(2),
+      ownerSession: { clientId: "orch", sessionName: "prod-diagnostics" },
+      prompt: "Check host service health and report anything that needs operator action.",
+      promptPreview: "Check host service health and report anything that needs...",
+      requestedModel: "standard",
+      risk: "high",
+      state: "running",
+      target: { shell: true },
+      updatedAt: iso(2)
+    },
+    {
+      actualModel: "standard",
+      branch: "fleet/youknowme/model-routing",
+      createdAt: iso(7),
+      deliveryMode: "pr_for_review",
+      id: "demo-model-route-003",
+      lastActivityAt: iso(7),
+      ownerSession: { clientId: "orch", sessionName: "model-routing" },
+      prompt: "Prepare model routing cleanup and open a PR for review.",
+      promptPreview: "Prepare model routing cleanup and open a PR for review.",
+      requestedModel: "standard",
+      risk: "low",
+      state: "queued",
+      target: { repo: "youknowme" },
+      updatedAt: iso(7),
+      worktreePath: "~/.codex-fleet/worktrees/youknowme/demo-model-route"
+    },
+    {
+      actualModel: "cheap",
+      branch: "fleet/agentchatpoc/docs-sync",
+      createdAt: iso(58),
+      deliveryMode: "patch",
+      exitCode: 0,
+      finalResponse:
+        "Updated the implementation notes and verified the dashboard selectors with focused tests.",
+      finalResponsePreview:
+        "Updated the implementation notes and verified the dashboard selectors...",
+      id: "demo-doc-sync-004",
+      ownerSession: { clientId: "orch", sessionName: "docs-sync" },
+      prompt: "Sync operational notes after the latest daemon cleanup changes.",
+      promptPreview: "Sync operational notes after the latest daemon cleanup changes.",
+      requestedModel: "cheap",
+      risk: "low",
+      state: "exited",
+      target: { repo: "agentchatpoc" },
+      updatedAt: iso(22)
+    }
+  ];
+  const selected = selectTask(
+    tasks,
+    selectVisibleTasks(tasks, collectedAt.getTime(), options).tasks,
+    options.taskId
+  );
+  const histories: Record<string, Event[]> = Object.fromEntries(
+    tasks.map((task, index) => [
+      task.id,
+      [
+        demoEvent(task.id, index * 10 + 1, iso(40 - index * 5), "task_created", "accepted task"),
+        demoEvent(
+          task.id,
+          index * 10 + 2,
+          iso(30 - index * 5),
+          "task_activity",
+          "worker prepared environment and started tool execution"
+        ),
+        demoEvent(
+          task.id,
+          index * 10 + 3,
+          iso(3 + index),
+          "task_activity",
+          task.state === "exited" ? "worker exited cleanly" : "worker reported live progress"
+        )
+      ]
+    ])
+  );
+  return {
+    codexUsage: {
+      daily: 245_000,
+      monthly: 5_740_000,
+      source: "local",
+      weekly: 1_920_000
+    },
+    collectedAt: collectedAt.toISOString(),
+    histories: selected ? { [selected.id]: histories[selected.id] ?? [] } : {},
+    tasks
+  };
+}
+
+function loadCodexUsage(now = new Date()): CodexUsageSummary {
+  const current = Date.now();
+  if (cachedCodexUsage && cachedCodexUsage.expiresAt > current) {
+    return cachedCodexUsage.summary;
+  }
+
+  const summary = readCodexUsage(now);
+  cachedCodexUsage = {
+    expiresAt: current + 60_000,
+    summary
+  };
+  return summary;
+}
+
+function readCodexUsage(now: Date): CodexUsageSummary {
+  const dbPath = codexStateDbPath();
+  if (!dbPath) {
+    return unavailableCodexUsage();
+  }
+
+  const starts = [startOfLocalDay(now), startOfLocalWeek(now), startOfLocalMonth(now)].map((date) =>
+    Math.floor(date.getTime() / 1_000)
+  );
+  const query = `
+    select
+      coalesce(sum(case when updated_at >= ${starts[0]} then tokens_used else 0 end), 0),
+      coalesce(sum(case when updated_at >= ${starts[1]} then tokens_used else 0 end), 0),
+      coalesce(sum(case when updated_at >= ${starts[2]} then tokens_used else 0 end), 0)
+    from threads;
+  `;
+  const proc = Bun.spawnSync(["sqlite3", dbPath, query], {
+    stderr: "pipe",
+    stdout: "pipe"
+  });
+  if (proc.exitCode !== 0) {
+    return unavailableCodexUsage();
+  }
+
+  const [daily, weekly, monthly] = proc.stdout
+    .toString()
+    .trim()
+    .split("|")
+    .map((value) => Number.parseInt(value, 10));
+  if (daily === undefined || weekly === undefined || monthly === undefined) {
+    return unavailableCodexUsage();
+  }
+  if (![daily, weekly, monthly].every((value) => Number.isFinite(value) && value >= 0)) {
+    return unavailableCodexUsage();
+  }
+  return { daily, monthly, source: "local", weekly };
+}
+
+function codexStateDbPath(): string | undefined {
+  const home = process.env.CODEX_HOME ?? `${process.env.HOME ?? ""}/.codex`;
+  const candidates = [`${home}/state_5.sqlite`, `${home}/sqlite/state_5.sqlite`];
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+function unavailableCodexUsage(): CodexUsageSummary {
+  return { daily: undefined, monthly: undefined, source: "unavailable", weekly: undefined };
+}
+
+function startOfLocalDay(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function startOfLocalWeek(value: Date): Date {
+  const day = value.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate() + mondayOffset);
+}
+
+function startOfLocalMonth(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), 1);
+}
+
+function demoEvent(taskId: string, seq: number, ts: string, type: string, summary: string): Event {
+  return { seq, summary, taskId, ts, type };
+}
+
+function moveSelectedTask(
+  data: DashboardData | undefined,
+  currentTaskId: string | undefined,
+  delta: number,
+  options: DashboardOptions
+): string | undefined {
+  if (!data) {
+    return undefined;
+  }
+  const visible = selectVisibleTasks(data.tasks, Date.parse(data.collectedAt), {
+    ...options,
+    taskId: currentTaskId
+  }).tasks;
+  if (visible.length === 0) {
+    return undefined;
+  }
+  const currentIndex = Math.max(
+    0,
+    visible.findIndex((task) => task.id === currentTaskId)
+  );
+  const nextIndex = clampNumber(currentIndex + delta, 0, visible.length - 1);
+  return visible[nextIndex]?.id;
+}
+
+function edgeSelectedTask(
+  data: DashboardData | undefined,
+  edge: "first" | "last",
+  options: DashboardOptions
+): string | undefined {
+  if (!data) {
+    return undefined;
+  }
+  const visible = selectVisibleTasks(data.tasks, Date.parse(data.collectedAt), options).tasks;
+  return edge === "first" ? visible[0]?.id : visible.at(-1)?.id;
 }
 
 function loadRpcOptions(): { socketPath: string; clientId: string; token: string } {
@@ -385,9 +806,9 @@ function renderWideDashboard(
   options: DashboardOptions
 ): string {
   const gap = 2;
-  const leftWidth = clampNumber(Math.floor(width * 0.36), 44, 62);
+  const leftWidth = clampNumber(Math.floor(width * 0.52), 58, 76);
   const rightWidth = width - leftWidth - gap;
-  const header = renderHeader(view.headerLines, width);
+  const header = renderHeader(view.headerLines, width, options);
   const headerHeight = header.length + 1;
   const mainBoxHeight =
     options.height !== undefined
@@ -421,7 +842,7 @@ function renderStackedDashboard(
   width: number,
   options: DashboardOptions
 ): string {
-  const header = renderHeader(view.headerLines, width);
+  const header = renderHeader(view.headerLines, width, options);
   const boxes = [
     renderBox("Tasks", view.taskLines, width, options),
     renderBox("Selected", view.detailLines, width, options),
@@ -492,6 +913,8 @@ function nativeStyleFromAnsi(value: string, current: NativeTextStyle): NativeTex
       next.attributes = (next.attributes ?? 0) | TextAttributes.BOLD;
     } else if (code === 2) {
       next.attributes = (next.attributes ?? 0) | TextAttributes.DIM;
+    } else if (code === 7) {
+      next.attributes = (next.attributes ?? 0) | TextAttributes.INVERSE;
     } else if (code === 31) {
       next.fg = ansiPalette.red;
     } else if (code === 32) {
@@ -507,16 +930,23 @@ function nativeStyleFromAnsi(value: string, current: NativeTextStyle): NativeTex
   return next;
 }
 
-const ansiPalette = {
-  cyan: RGBA.fromInts(80, 210, 225),
-  green: RGBA.fromInts(110, 210, 125),
-  red: RGBA.fromInts(235, 95, 95),
-  white: RGBA.fromInts(225, 230, 235),
-  yellow: RGBA.fromInts(235, 205, 95)
-};
-
-function renderHeader(lines: string[], width: number): string[] {
-  return lines.map((line) => fitLine(line, width));
+function renderHeader(lines: string[], width: number, options: DashboardOptions): string[] {
+  if (width < 82) {
+    return lines.map((line, index) =>
+      fitLine(index === 0 ? `${line}  ${style("CODEX FLEET", "logo", options)}` : line, width)
+    );
+  }
+  const logoWidth = Math.max(...codexLogo.map(visibleLength));
+  const leftWidth = Math.max(1, width - logoWidth - 2);
+  const rows = Math.max(lines.length, codexLogo.length);
+  const output: string[] = [];
+  for (let index = 0; index < rows; index += 1) {
+    const left = fitLine(lines[index] ?? "", leftWidth);
+    const logoLine = codexLogo[index];
+    const logo = logoLine ? style(logoLine, "logo", options) : "";
+    output.push(`${left}  ${padVisible(logo, logoWidth)}`);
+  }
+  return output.map((line) => fitLine(line, width));
 }
 
 function combineColumns(
@@ -544,8 +974,8 @@ function renderBox(
   maxInnerLines?: number
 ): string[] {
   const visibleTitle = ` ${title} `;
-  const top = `+${visibleTitle}${"-".repeat(Math.max(0, width - visibleTitle.length - 2))}+`;
-  const bottom = `+${"-".repeat(Math.max(0, width - 2))}+`;
+  const top = `╭${visibleTitle}${"─".repeat(Math.max(0, width - visibleTitle.length - 2))}╮`;
+  const bottom = `╰${"─".repeat(Math.max(0, width - 2))}╯`;
   const innerWidth = Math.max(1, width - 4);
   const innerLines = maxInnerLines
     ? padLines(clampLines(lines, maxInnerLines, options), maxInnerLines)
@@ -554,7 +984,7 @@ function renderBox(
     style(top, "border", options),
     ...innerLines.map(
       (line) =>
-        `${style("|", "border", options)} ${fitLine(line, innerWidth)} ${style("|", "border", options)}`
+        `${style("│", "border", options)} ${fitLine(line, innerWidth)} ${style("│", "border", options)}`
     ),
     style(bottom, "border", options)
   ];
@@ -673,10 +1103,22 @@ function selectVisibleTasks(
   };
 }
 
-function formatTaskRow(task: TaskSnapshot, now: number, options: DashboardOptions): string {
-  const prefix = liveStates.has(task.state) ? ">>" : needsAttention(task) ? "!!" : "  ";
-  const target = formatTarget(task).padEnd(16);
-  const state = padVisible(stateBadge(task, options), 16);
+function formatTaskRow(
+  task: TaskSnapshot,
+  now: number,
+  options: DashboardOptions,
+  isSelected = false
+): string {
+  const prefix = isSelected
+    ? ">"
+    : liveStates.has(task.state)
+      ? "*"
+      : needsAttention(task)
+        ? "!"
+        : " ";
+  const rowOptions = isSelected ? { ...options, color: false } : options;
+  const target = formatTarget(task).padEnd(14);
+  const state = padVisible(stateBadge(task, rowOptions), 12);
   const age = liveStates.has(task.state)
     ? `running ${formatAge(Date.parse(task.createdAt), now)}`
     : `updated ${formatAge(Date.parse(task.updatedAt), now)} ago`;
@@ -684,9 +1126,8 @@ function formatTaskRow(task: TaskSnapshot, now: number, options: DashboardOption
     liveStates.has(task.state) || task.state === "stale"
       ? `quiet ${formatQuiet(task, now)}`
       : formatTerminalStatus(task);
-  return [prefix, task.id.slice(0, 8), state, target, formatSession(task), age, quiet]
-    .filter(Boolean)
-    .join("  ");
+  const row = [prefix, task.id.slice(0, 8), state, target, quiet || age].filter(Boolean).join("  ");
+  return isSelected ? style(row, "selected", options) : row;
 }
 
 function formatEventRow(event: Event, options: DashboardOptions): string {
@@ -846,6 +1287,7 @@ function attentionActions(task: TaskSnapshot): string[] {
     actions.push(`diff: git -C ${shellQuote(worktreePath)} status --short`);
     actions.push(`release: codex-fleet cleanup run --task ${id}`);
     actions.push(`force if disposable: codex-fleet cleanup run --task ${id} --force`);
+    actions.push("wipe all disposable worktrees: press x");
   }
   if (task.state !== "exited" || (task.exitCode ?? 0) !== 0) {
     actions.push("rerun as a new task if the failure is still relevant");
@@ -890,6 +1332,42 @@ function formatDuration(ms: number | undefined): string {
     return `${ms}ms`;
   }
   return `${Math.round(ms / 1_000)}s`;
+}
+
+function formatCodexUsage(summary: CodexUsageSummary | undefined): string {
+  if (!summary || summary.source === "unavailable") {
+    return "today n/a | week n/a | month n/a";
+  }
+  return [
+    `today ${formatTokenCount(summary.daily)}`,
+    `week ${formatTokenCount(summary.weekly)}`,
+    `month ${formatTokenCount(summary.monthly)}`
+  ].join(" | ");
+}
+
+function formatTokenCount(value: number | undefined): string {
+  if (value === undefined) {
+    return "n/a";
+  }
+  if (value >= 1_000_000) {
+    return `${trimFixed(value / 1_000_000)}M`;
+  }
+  if (value >= 1_000) {
+    return `${trimFixed(value / 1_000)}k`;
+  }
+  return String(value);
+}
+
+function trimFixed(value: number): string {
+  return value.toFixed(value >= 10 ? 0 : 1).replace(/\.0$/, "");
+}
+
+function formatLocalTimestamp(value: string): string {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return value;
+  }
+  return localDateTimeFormatter.format(new Date(timestamp));
 }
 
 function formatAge(timestamp: number, now: number): string {
@@ -951,7 +1429,18 @@ function shellQuote(value: string): string {
 
 function style(
   value: string,
-  kind: "active" | "bad" | "border" | "dim" | "info" | "ok" | "section" | "title" | "warn",
+  kind:
+    | "active"
+    | "bad"
+    | "border"
+    | "dim"
+    | "info"
+    | "logo"
+    | "ok"
+    | "section"
+    | "selected"
+    | "title"
+    | "warn",
   options: DashboardOptions
 ): string {
   if (!options.color) {
@@ -963,8 +1452,10 @@ function style(
     border: "2;37",
     dim: "2",
     info: "1;36",
+    logo: "1;36",
     ok: "32",
     section: "1;37",
+    selected: "1;33",
     title: "1;36",
     warn: "1;33"
   } satisfies Record<typeof kind, string>;

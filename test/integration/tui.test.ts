@@ -143,10 +143,18 @@ describe("tui dashboard", () => {
       { color: false, width: 120 }
     );
 
-    expect(rendered).toContain("+ Tasks");
-    expect(rendered).toContain("+ Selected");
-    expect(rendered).toContain("+ Events");
+    expect(rendered).toContain("╭ Tasks");
+    expect(rendered).toContain("╭ Selected");
+    expect(rendered).toContain("╭ Events");
+    expect(rendered).toContain("CODEX FLEET");
+    expect(rendered).toContain(">  selected");
     expect(rendered).toContain("Selected Task");
+    expect(rendered).toContain(`Started:  ${formatExpectedLocalTimestamp(selected.createdAt)}`);
+    expect(rendered).toContain(`Updated:  ${formatExpectedLocalTimestamp(selected.updatedAt)}`);
+    expect(rendered).toContain(
+      `updated ${formatExpectedLocalTimestamp("2026-06-18T18:00:00.000Z")}`
+    );
+    expect(rendered).not.toContain("2026-06-18T18:00:00.000Z");
     expect(rendered).toContain("Prompt");
     expect(rendered).toContain("Explain the selected task prompt");
     expect(rendered).toContain("Final Response");
@@ -154,7 +162,54 @@ describe("tui dashboard", () => {
     expect(rendered).toContain("Worker Stderr");
     expect(rendered).toContain("stderr diagnostic line");
     expect(rendered).toContain("task_activity");
-    expect(rendered.indexOf("+ Events")).toBeGreaterThan(rendered.indexOf("+ Selected"));
+    expect(rendered.indexOf("╭ Events")).toBeGreaterThan(rendered.indexOf("╭ Selected"));
+  });
+
+  it("keeps the selected row readable in color mode", () => {
+    const rendered = renderDashboard(
+      {
+        collectedAt: "2026-06-18T18:00:00.000Z",
+        histories: {},
+        tasks: [
+          task({
+            id: "selected-readable-task",
+            state: "running",
+            createdAt: "2026-06-18T17:55:00.000Z",
+            updatedAt: "2026-06-18T17:55:00.000Z",
+            lastActivityAt: "2026-06-18T17:55:00.000Z"
+          })
+        ]
+      },
+      { color: true, width: 120 }
+    );
+
+    expect(rendered).toContain("\u001b[1;33m>  selected");
+    expect(rendered).not.toContain("\u001b[7;");
+  });
+
+  it("renders demo fleet data with multiple active sessions and a persistent logo", async () => {
+    const output = await runTui(
+      "",
+      "--once",
+      "--json",
+      "--demo",
+      "--no-color",
+      "--task",
+      "demo-prod"
+    );
+
+    expect(output.rendered).toContain("Codex Fleet");
+    expect(output.rendered).toContain("CODEX FLEET");
+    expect(output.rendered).toContain("Codex tokens: today 245k | week 1.9M | month 5.7M");
+    expect(output.rendered).toContain("NAV: j/k or arrows move");
+    expect(output.rendered).toContain("VIEW: o overview");
+    expect(output.rendered).toContain("OPS: x wipe clean action queue");
+    expect(output.rendered).toContain("LIVE 3");
+    expect(output.rendered).toContain("orch/ui-polish");
+    expect(output.rendered).toContain("orch/prod-diagnostics");
+    expect(output.rendered).toContain("orch/model-routing");
+    expect(output.rendered).toContain(">  demo-pro");
+    expect(output.tasks).toHaveLength(4);
   });
 
   it("can focus the selected pane on the retained prompt", () => {
@@ -214,6 +269,7 @@ describe("tui dashboard", () => {
       expect(rendered).toContain("inspect: codex-fleet status repo-wor");
       expect(rendered).toContain("diff: git -C");
       expect(rendered).toContain("release: codex-fleet cleanup run --task repo-wor");
+      expect(rendered).toContain("wipe all disposable worktrees: press x");
       expect(rendered).toContain("1 older task hidden");
     } finally {
       rmSync(worktreePath, { force: true, recursive: true });
@@ -341,4 +397,16 @@ function event(taskId: string, seq: number, type: string, summary: string): Even
     ts: "2026-06-18T18:00:00.000Z",
     type
   };
+}
+
+function formatExpectedLocalTimestamp(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+    second: "2-digit",
+    timeZoneName: "short",
+    year: "numeric"
+  }).format(new Date(value));
 }
