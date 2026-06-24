@@ -1,0 +1,24 @@
+Codex Fleet                                                 ___ ___  ___  _____  __ 
+mode overview | selected demo-ui-                          / __/ _ \|   \| __\ \/ / 
+LIVE 3 | attention 0 | queued 1 | running 2 | stale ...   | (_| (_) | |) | _| >  <  
+tasks 4 | visible 4 | repos 3 | median-runtime 2160s...    \___\___/|___/|___/_/\_\ 
+Codex tokens: today 245k | week 1.9M | month 5.7M                CODEX FLEET        
+FOCUS: TASKS                                                                        
+NAV: h/l/e focus | j/k/up/down move or scroll | PgUp...                             
+VIEW: o overview   p prompt   r result   s stderr   ...                             
+OPS: x wipe clean action queue                                                      
+updated Jun 23, 2026 at 10:12:21 PM PDT                                             
+                                                                                    
+╭ Tasks  ──────────────────────────────────────────────────────────────────────────╮
+│ Live                                                                             │
+│ ... 11 more lines                                                                │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+                                                                                    
+╭ Selected  ───────────────────────────────────────────────────────────────────────╮
+│ [ ] DETAIL 1-1 of 17                                                             │
+│ Selected Task                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+                                                                                    
+╭ Events  ─────────────────────────────────────────────────────────────────────────╮
+│ [ ] EVENTS 1-2 of 15                                                             │
+│    1 task_created   accepted task                                                │
