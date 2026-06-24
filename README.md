@@ -207,13 +207,22 @@ Token totals are local and best-effort. They are not downloaded and are cached b
 
 Read [AGENTS.md](AGENTS.md) before agent-driven changes.
 
-Useful commands:
+Useful commands (run via `mise exec --`):
 
 ```sh
 mise exec -- bun run typecheck
+mise exec -- bun run typecheck:watch
 mise exec -- bun run lint
+mise exec -- bun run lint:fix
+mise exec -- bun run format
 mise exec -- bun run format:check
-mise exec -- bun test
+mise exec -- bun run test:unit
+mise exec -- bun run test:integration
+mise exec -- bun run test:all
+mise exec -- bun run test:all-raw
+mise exec -- bun run build
+mise exec -- bun run test:e2e:codex
+mise exec -- bun run test
 mise exec -- bun run check
 ```
 
