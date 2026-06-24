@@ -216,6 +216,5 @@ mise exec -- bun run test:e2e:codex
 ## Docs and development references
 
 - `docs/DESIGN.md`: source-of-truth design context
-- `docs/public-readiness/`: readiness slices and evidence artifacts
 - `docs/CODE_WALKTHROUGH.md`: implementation walkthrough and boundaries
 - [AGENTS.md](AGENTS.md): agent operation constraints
