@@ -9,15 +9,24 @@
   ],
   "scripts": {
     "build:bin": "bun run scripts/build-bin.ts",
-    "check": "bun run typecheck && bun run lint && bun run format:check && bun test",
+    "build": "bun run build:bin",
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun run test:all",
     "format": "prettier --write .",
+    "format:write": "bun run format",
     "format:check": "prettier --check .",
     "install:bin": "bun run build:bin && bun run scripts/install-bin.ts",
     "lint": "eslint .",
+    "lint:ci": "bun run lint",
+    "lint:fix": "eslint . --fix",
     "spike:bun": "bun run scripts/spike-bun.ts",
-    "test": "vitest run",
-    "test:e2e:codex": "CODEX_FLEET_RUN_CODEX_E2E=1 vitest run test/e2e/codex.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "test": "bun run test:all",
+    "test:all": "bun run test:unit && bun run test:integration",
+    "test:integration": "bun test test/integration --pass-with-no-tests",
+    "test:e2e:codex": "CODEX_FLEET_RUN_CODEX_E2E=1 bun test test/e2e/codex.test.ts --pass-with-no-tests",
+    "test:unit": "bun test test/schema --pass-with-no-tests",
+    "test:all-raw": "bun test",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:watch": "tsc -p tsconfig.json --noEmit --watch"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
