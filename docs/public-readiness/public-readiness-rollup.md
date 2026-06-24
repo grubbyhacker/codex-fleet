@@ -44,7 +44,7 @@ Resolution:
 
 ## Validation evidence
 
-- `mise exec -- bun run check` executed after full integration and passed (or failed only with pre-existing external/environmental issues, if observed).
+- `mise exec -- bun run check` executed after full integration and passed.
 - No merge conflicts remain.
 - `docs/public-readiness/tui-artifacts/*` and `test/integration/tui.test.ts` remained in place with the TUI UX overhaul slice.
 
