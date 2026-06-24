@@ -27,7 +27,7 @@ Create a durable tracker for gaps that block first-time public users from unders
 ### Design and plan docs
 
 1. `docs/DESIGN.md` is the correct architectural source, but users are not currently directed there as the “large architecture” source.
-2. `docs/CODE_WALKTHROUGH.md` is referenced by process instructions, but file does not yet exist.
+2. `docs/CODE_WALKTHROUGH.md` had not yet been introduced; this gap is now closed.
 3. `docs/PRODUCTIONIZATION_PLAN.md` contains rollout steps and private example aliases; these are internal operational specifics, not public-first getting-started guidance.
 
 ### Stale or ambiguous statements
@@ -47,7 +47,7 @@ Create a durable tracker for gaps that block first-time public users from unders
   - operator CLI + TUI usage with common commands,
   - safety boundaries,
   - and a local validation checklist.
-- Added explicit architectural reference to `docs/DESIGN.md` and documented missing `docs/CODE_WALKTHROUGH.md` dependency.
+- Added explicit architectural reference to `docs/DESIGN.md` and added `docs/CODE_WALKTHROUGH.md` as the dedicated architecture walkthrough.
 - Linked operational documents to scope (design vs rollout docs), preserving separation between user semantics and deployment/planning content.
 
 ## Status
@@ -58,6 +58,5 @@ Create a durable tracker for gaps that block first-time public users from unders
 
 ## Remaining risk notes
 
-1. There is still no dedicated `docs/CODE_WALKTHROUGH.md`; until it exists, users may need to read `docs/DESIGN.md` directly for deeper architecture context.
-2. Operational instructions remain macOS-heavy for managed service lifecycle, while manual daemon runtime remains cross-platform.
-3. Full MCP client setup still depends on each consumer’s existing MCP app conventions; codex-fleet only documents the adapter contract.
+1. Operational instructions remain macOS-heavy for managed service lifecycle, while manual daemon runtime remains cross-platform.
+2. Full MCP client setup still depends on each consumer’s existing MCP app conventions; codex-fleet only documents the adapter contract.
