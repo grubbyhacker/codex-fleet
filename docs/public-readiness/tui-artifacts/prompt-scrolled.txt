@@ -1,0 +1,26 @@
+Codex Fleet  CODEX FLEET                                                        
+mode prompt | selected demo-pro                                                 
+LIVE 3 | attention 0 | queued 1 | running 2 | stale 0 | exited 1 | cleanup-pe...
+tasks 4 | visible 4 | repos 3 | median-runtime 2160s | longest-runtime 2160s    
+Codex tokens: today 245k | week 1.9M | month 5.7M                               
+FOCUS: TASKS                                                                    
+NAV: h/l/e focus | j/k/up/down move or scroll | PgUp/PgDn jump | g/G first/last 
+VIEW: o overview   p prompt   r result   s stderr   Tab cycle mode              
+OPS: x wipe clean action queue                                                  
+updated Jun 23, 2026 at 10:12:35 PM PDT                                         
+                                                                                
+╭ Tasks  ──────────────────────────────────────────────────────────────────────╮
+│ Live                                                                         │
+│ ... 11 more lines                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+                                                                                
+╭ Selected  ───────────────────────────────────────────────────────────────────╮
+│ [ ] DETAIL 7-9 of 11                                                         │
+│   ^ older lines above                                                        │
+│ Check host service health and report anything that needs operator            │
+│ action. Verify package queue backlog, queue depth, API latency by            │
+│ endpoint, and any stale lock contention in the local worker pool.            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+                                                                                
+╭ Events  ─────────────────────────────────────────────────────────────────────╮
+│ [ ] EVENTS 1-1 of 15                                                         │

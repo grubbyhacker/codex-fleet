@@ -201,7 +201,8 @@ describe("tui dashboard", () => {
     expect(output.rendered).toContain("Codex Fleet");
     expect(output.rendered).toContain("CODEX FLEET");
     expect(output.rendered).toContain("Codex tokens: today 245k | week 1.9M | month 5.7M");
-    expect(output.rendered).toContain("NAV: j/k or arrows move");
+    expect(output.rendered).toContain("FOCUS: TASKS");
+    expect(output.rendered).toContain("NAV: h/l/e focus");
     expect(output.rendered).toContain("VIEW: o overview");
     expect(output.rendered).toContain("OPS: x wipe clean action queue");
     expect(output.rendered).toContain("LIVE 3");

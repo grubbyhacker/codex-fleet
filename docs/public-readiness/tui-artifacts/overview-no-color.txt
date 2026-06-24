@@ -1,0 +1,26 @@
+Codex Fleet                                                                                     ___ ___  ___  _____  __ 
+mode overview | selected demo-ui-                                                              / __/ _ \|   \| __\ \/ / 
+LIVE 3 | attention 0 | queued 1 | running 2 | stale 0 | exited 1 | cleanup-pending 0          | (_| (_) | |) | _| >  <  
+tasks 4 | visible 4 | repos 3 | median-runtime 2160s | longest-runtime 2160s                   \___\___/|___/|___/_/\_\ 
+Codex tokens: today 245k | week 1.9M | month 5.7M                                                    CODEX FLEET        
+FOCUS: TASKS                                                                                                            
+NAV: h/l/e focus | j/k/up/down move or scroll | PgUp/PgDn jump | g/G first/last                                         
+VIEW: o overview   p prompt   r result   s stderr   Tab cycle mode                                                      
+OPS: x wipe clean action queue                                                                                          
+updated Jun 23, 2026 at 10:12:21 PM PDT                                                                                 
+                                                                                                                        
+╭ Tasks  ────────────────────────────────────────────────────╮  ╭ Selected  ───────────────────────────────────────────╮
+│ Live                                                       │  │ [ ] DETAIL 1-5 of 16                                 │
+│   id        state       target          signal             │  │ Selected Task                                        │
+│ session orch/ui-polish                                     │  │ Task demo-ui-polish-001                              │
+│ >  demo-ui-  [RUNNING]     repo codex-fleet  quiet 1m ago  │  │ Target:   repo codex-fleet                           │
+│ session orch/prod-diagnostics                              │  │ Session:  orch/ui-polish                             │
+│ *  demo-pro  [RUNNING]     shell           quiet 2m ago    │  │ State:    [RUNNING]                                  │
+│ ... 6 more lines                                           │  │   v newer lines below                                │
+╰────────────────────────────────────────────────────────────╯  ╰──────────────────────────────────────────────────────╯
+╭ Events  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ [ ] EVENTS 1-2 of 15                                                                                                 │
+│    1 task_created   accepted task                                                                                    │
+│    2 task_activity  worker prepared environment and started tool execution                                           │
+│   v newer lines below                                                                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

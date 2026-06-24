@@ -1,0 +1,26 @@
+Codex Fleet                                                                                     ___ ___  ___  _____  __ 
+mode stderr | selected demo-doc                                                                / __/ _ \|   \| __\ \/ / 
+LIVE 3 | attention 0 | queued 1 | running 2 | stale 0 | exited 1 | cleanup-pending 0          | (_| (_) | |) | _| >  <  
+tasks 4 | visible 4 | repos 3 | median-runtime 2160s | longest-runtime 2160s                   \___\___/|___/|___/_/\_\ 
+Codex tokens: today 245k | week 1.9M | month 5.7M                                                    CODEX FLEET        
+FOCUS: TASKS                                                                                                            
+NAV: h/l/e focus | j/k/up/down move or scroll | PgUp/PgDn jump | g/G first/last                                         
+VIEW: o overview   p prompt   r result   s stderr   Tab cycle mode                                                      
+OPS: x wipe clean action queue                                                                                          
+updated Jun 23, 2026 at 10:12:22 PM PDT                                                                                 
+                                                                                                                        
+╭ Tasks  ────────────────────────────────────────────────────╮  ╭ Selected  ───────────────────────────────────────────╮
+│ Live                                                       │  │ Selected Task                                        │
+│   id        state       target          signal             │  │ Task demo-doc-sync-004                               │
+│ session orch/ui-polish                                     │  │ Target:   repo agentchatpoc                          │
+│ *  demo-ui-  [RUNNING]     repo codex-fleet  quiet 1m ago  │  │ Session:  orch/docs-sync                             │
+│ session orch/prod-diagnostics                              │  │ State:    [EXITED]                                   │
+│ *  demo-pro  [RUNNING]     shell           quiet 2m ago    │  │ Worker Stderr                                        │
+│ session orch/model-routing                                 │  │ stderr: open_file failed for /tmp/agent-cache/age... │
+│ *  demo-mod  [QUEUED]      repo youknowme  quiet 7m ago    │  │ stderr: retrying with --force flag...                │
+│                                                            │  │ stderr: fallback path selected /tmp/agent-cache/a... │
+│ Recent Results                                             │  │ stderr: validation check docs/public-readiness/tu... │
+│ ... 2 more lines                                           │  │ stderr: continuing with updated artifact baseline... │
+╰────────────────────────────────────────────────────────────╯  ╰──────────────────────────────────────────────────────╯
+╭ Events  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ [ ] EVENTS 1-1 of 15                                                                                                 │
