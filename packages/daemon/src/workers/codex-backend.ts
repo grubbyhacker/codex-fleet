@@ -57,23 +57,26 @@ export class CodexWorkerBackend implements WorkerBackend {
       });
       await client.connect(transport, { timeout: 30_000 });
       input.onActivity?.({ kind: "heartbeat", detail: "connected" });
-      const result = await client.callTool(
-        input.codexThreadId
-          ? {
-              name: "codex-reply",
-              arguments: {
-                prompt: input.request.prompt,
-                threadId: input.codexThreadId
-              }
-            }
-          : {
-              name: "codex",
-              arguments: codexWorkerToolArguments(input, cwd)
-            },
-        undefined,
-        { timeout: Number(process.env.CODEX_FLEET_CODEX_TIMEOUT_MS ?? "600000") }
-      );
-      return withWorkerStderr(codexWorkerResultFromToolResult(result), stderrCapture.read());
+      const result = await client.callTool(codexToolCall(input, cwd), undefined, {
+        timeout: codexTimeoutMs()
+      });
+      let workerResult = codexWorkerResultFromToolResult(result);
+      if (input.codexThreadId && isCodexSessionNotFound(workerResult.finalResponse)) {
+        input.onActivity?.({
+          kind: "codex_event",
+          detail: "resume_thread_missing_retrying_fresh"
+        });
+        const retryResult = await client.callTool(
+          {
+            name: "codex",
+            arguments: codexWorkerToolArguments(input, cwd)
+          },
+          undefined,
+          { timeout: codexTimeoutMs() }
+        );
+        workerResult = codexWorkerResultFromToolResult(retryResult);
+      }
+      return withWorkerStderr(workerResult, stderrCapture.read());
     } catch (error) {
       const stderr = stderrCapture.read();
       throw new WorkerRunError(error instanceof Error ? error.message : String(error), {
@@ -125,6 +128,28 @@ export function codexWorkerToolArguments(input: WorkerInput, cwd: string): Recor
     "approval-policy": "never",
     "developer-instructions": workerInstructions(input)
   });
+}
+
+function codexToolCall(
+  input: WorkerInput,
+  cwd: string
+): { name: "codex" | "codex-reply"; arguments: Record<string, unknown> } {
+  return input.codexThreadId
+    ? {
+        name: "codex-reply",
+        arguments: {
+          prompt: input.request.prompt,
+          threadId: input.codexThreadId
+        }
+      }
+    : {
+        name: "codex",
+        arguments: codexWorkerToolArguments(input, cwd)
+      };
+}
+
+function codexTimeoutMs(): number {
+  return Number(process.env.CODEX_FLEET_CODEX_TIMEOUT_MS ?? "600000");
 }
 
 function defaultCodexCommandCandidates(): string[] {
@@ -236,6 +261,9 @@ function isCodexBackendError(content: string): boolean {
   if (!content.trim()) {
     return false;
   }
+  if (isCodexSessionNotFound(content)) {
+    return true;
+  }
 
   try {
     const parsed = JSON.parse(content) as CodexBackendError;
@@ -250,6 +278,10 @@ function isCodexBackendError(content: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isCodexSessionNotFound(content: string): boolean {
+  return /^Session not found for thread_id: \S+/i.test(content.trim());
 }
 
 function withWorkerStderr(result: WorkerResult, stderr: string): WorkerResult {

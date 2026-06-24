@@ -186,6 +186,24 @@ describe("codex worker backend", () => {
     });
   });
 
+  it("marks codex missing-session text as a failed worker result", () => {
+    const content = "Session not found for thread_id: 019ef6fa-8c18-7ad3-9ce7-2932e2d33132";
+
+    const result = codexWorkerResultFromToolResult({
+      structuredContent: {
+        threadId: "019ef6fa-8c18-7ad3-9ce7-2932e2d33132",
+        content
+      }
+    });
+
+    expect(result).toMatchObject({
+      exitCode: 1,
+      codexThreadId: "019ef6fa-8c18-7ad3-9ce7-2932e2d33132",
+      finalResponse: content,
+      finalResponsePreview: content
+    });
+  });
+
   it("captures bounded worker stderr text", () => {
     const stream = new PassThrough();
     const capture = captureTextStream(stream, 12);
