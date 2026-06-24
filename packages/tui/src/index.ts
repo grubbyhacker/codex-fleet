@@ -735,7 +735,7 @@ function demoDashboardData(): DashboardData {
         "stderr: open_file failed for /tmp/agent-cache/agentchatpoc/.notes/old.patch (Permission denied)\n" +
         "stderr: retrying with --force flag...\n" +
         "stderr: fallback path selected /tmp/agent-cache/agentchatpoc/.notes/recovered.patch\n" +
-        "stderr: validation check docs/public-readiness/tui-ux-overview.md failed: stale timestamp in follow-up section\n" +
+        "stderr: validation check failed: stale timestamp in follow-up section\n" +
         "stderr: continuing with updated artifact baseline and queuing review for follow-ups",
       requestedModel: "cheap",
       risk: "low",
