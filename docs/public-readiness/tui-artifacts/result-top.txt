@@ -1,0 +1,26 @@
+Codex Fleet                                                                                     ___ ___  ___  _____  __ 
+mode result | selected demo-doc                                                                / __/ _ \|   \| __\ \/ / 
+LIVE 3 | attention 0 | queued 1 | running 2 | stale 0 | exited 1 | cleanup-pending 0          | (_| (_) | |) | _| >  <  
+tasks 4 | visible 4 | repos 3 | median-runtime 2160s | longest-runtime 2160s                   \___\___/|___/|___/_/\_\ 
+Codex tokens: today 245k | week 1.9M | month 5.7M                                                    CODEX FLEET        
+FOCUS: TASKS                                                                                                            
+NAV: h/l/e focus | j/k/up/down move or scroll | PgUp/PgDn jump | g/G first/last                                         
+VIEW: o overview   p prompt   r result   s stderr   Tab cycle mode                                                      
+OPS: x wipe clean action queue                                                                                          
+updated Jun 23, 2026 at 10:12:22 PM PDT                                                                                 
+                                                                                                                        
+╭ Tasks  ────────────────────────────────────────────────────╮  ╭ Selected  ───────────────────────────────────────────╮
+│ Live                                                       │  │ [ ] DETAIL 1-9 of 13                                 │
+│   id        state       target          signal             │  │ Selected Task                                        │
+│ session orch/ui-polish                                     │  │ Task demo-doc-sync-004                               │
+│ *  demo-ui-  [RUNNING]     repo codex-fleet  quiet 1m ago  │  │ Target:   repo agentchatpoc                          │
+│ session orch/prod-diagnostics                              │  │ Session:  orch/docs-sync                             │
+│ *  demo-pro  [RUNNING]     shell           quiet 2m ago    │  │ State:    [EXITED]                                   │
+│ session orch/model-routing                                 │  │ Final Response                                       │
+│ *  demo-mod  [QUEUED]      repo youknowme  quiet 7m ago    │  │ The documentation synchronization completed with ... │
+│                                                            │  │ checks are in sync. I audited the repository for ... │
+│ Recent Results                                             │  │ and validated that all daemon-facing command exam... │
+│ ... 2 more lines                                           │  │   v newer lines below                                │
+╰────────────────────────────────────────────────────────────╯  ╰──────────────────────────────────────────────────────╯
+╭ Events  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ [ ] EVENTS 1-1 of 15                                                                                                 │
