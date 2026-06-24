@@ -1,60 +1,53 @@
 # codex-fleet
 
-Codex Fleet is a local, single-operator orchestration layer for running multiple Codex workers from one orchestrator session, while keeping durable task state outside the MCP connection.
+Codex Fleet is a local, single-operator orchestration layer for running multiple Codex workers from one orchestrator session (for example Claude/Cowork), while keeping task state, logs, and resources durable outside the MCP process.
 
-The core loop is:
+What it gives you:
 
-1. An orchestrator such as Claude/Cowork connects through the MCP adapter.
-2. It calls `initialize` to name the current work session.
-3. It delegates repo or shell tasks to the daemon.
-4. The daemon starts task-scoped Codex workers, tracks events, owns worktrees/scratch dirs, and preserves final output.
-5. The CLI and TUI show what happened and clean up disposable Fleet-owned resources.
+- One durable local daemon + authenticated socket (`codex-fleet-daemon`).
+- A stateless MCP adapter (`codex-fleet-mcp`) that keeps orchestrators simple.
+- A CLI for operators (`codex-fleet`) and a TUI dashboard (`codex-fleet-tui`).
+- Repo and shell task targeting with per-task worktrees and cleanup workflows.
 
-This repo implements the v1 shape described in [docs/DESIGN.md](docs/DESIGN.md), plus the accepted design changes in `docs/DCR-*.md`.
+The public behavior contract is in [docs/DESIGN.md](docs/DESIGN.md). This repository does not expose a hosted API; everything is local-first and workspace-local by default.
 
-## What Exists
+## Public-reader quickstart
 
-- `codex-fleet-daemon`: durable local daemon and Unix-socket RPC server.
-- `codex-fleet-mcp`: stateless stdio MCP adapter for orchestrators.
-- `codex-fleet`: operator CLI for clients, service setup, task inspection, and cleanup.
-- `codex-fleet-tui`: OpenTUI dashboard for live fleet visibility.
-- Per-client auth tokens and scopes under `~/.codex-fleet`.
-- Repo targets backed by Fleet-owned mirrors or legacy base checkouts.
-- Per-task repo worktrees under `~/.codex-fleet/worktrees/<repo>/<taskShort>`.
-- Per-task shell scratch dirs under `~/.codex-fleet/shell/<taskShort>`.
-- Event/task state durable enough to survive MCP adapter or orchestrator restarts.
+### 1) Prerequisites
 
-## Bootstrap
+Required:
 
-This repo uses `mise` to pin runtimes and Bun for package management, scripts, tests, and builds.
+- [`mise`](https://mise.jdx.dev/) and the project-pinned Bun toolchain (managed via `mise`).
+- A working `codex` binary for real execution (`CODEX_FLEET_CODEX_COMMAND` can be set to your preferred path).
+
+Recommended:
+
+- macOS for launchd flow (`service launch-agent`), or launch daemon manually if you prefer another process supervisor.
+- Git and repo tooling available to the worker process.
+
+Runtime assumptions:
+
+- State and sockets default to `~/.codex-fleet` unless `CODEX_FLEET_STATE_DIR` is set.
+- This is single-operator by design (local workspace ownership assumptions, broad shell access for shell workers, local token files, local log/state retention).
+- Workers currently run with host-local access; this is intentional, and safe-for-multi-user is not yet assumed.
+
+### 2) Bootstrap and install
 
 ```sh
 mise install
 mise exec -- bun install
-mise exec -- bun run check
+mise exec -- bun run build:bin
 mise exec -- bun run install:bin
 ```
 
-Installed binaries go to `~/.local/bin`:
+Binaries install to `~/.local/bin`:
 
-```sh
-codex-fleet
-codex-fleet-daemon
-codex-fleet-mcp
-codex-fleet-tui
-```
+- `codex-fleet`
+- `codex-fleet-daemon`
+- `codex-fleet-mcp`
+- `codex-fleet-tui`
 
-When changing TUI behavior, rebuild and install before using it:
-
-```sh
-mise exec -- bun run install:bin
-```
-
-## State And Clients
-
-Default state lives in `~/.codex-fleet`. Override with `CODEX_FLEET_STATE_DIR` for tests or isolated runs.
-
-Create clients once:
+### 3) Configure clients (auth + role)
 
 ```sh
 codex-fleet client init cli --role cli
@@ -62,21 +55,19 @@ codex-fleet client init dashboard --role dashboard
 codex-fleet client init claudecowork --role orchestrator
 ```
 
-Roles matter:
+- `cli`: operator commands such as `list`, `status`, `logs`, and cleanup actions.
+- `dashboard`: read-only visibility helpers.
+- `orchestrator`: MCP-facing role for `initialize`, delegation, and task monitoring.
 
-- `orchestrator`: delegate, wait, inspect, and end its tasks.
-- `dashboard`: read-only task visibility.
-- `cli`: operator commands, including cleanup and service management.
-
-## Running The Daemon
+### 4) Run the daemon
 
 Foreground:
 
 ```sh
-codex-fleet-daemon run
+codex-fleet daemon run
 ```
 
-macOS LaunchAgent:
+Managed service (macOS):
 
 ```sh
 codex-fleet service launch-agent install
@@ -84,152 +75,169 @@ codex-fleet service launch-agent load
 codex-fleet service launch-agent status
 ```
 
-Restart after changing installed binaries:
+Optional restart after binary upgrades:
 
 ```sh
 codex-fleet service launch-agent restart
 ```
 
-## MCP Adapter
+### 5) Use the MCP adapter
 
-Point an MCP client at:
+Point your MCP client at the installed adapter binary:
 
 ```sh
 ~/.local/bin/codex-fleet-mcp
 ```
 
-Use a client id/token created with the orchestrator role, usually through environment/config:
+Set orchestrator identity in environment:
 
 ```sh
 CODEX_FLEET_CLIENT_ID=claudecowork
 ```
 
-The adapter is disposable. It proxies to the daemon; task state stays in the daemon.
+If needed:
 
-## Repo Targets
+```sh
+CODEX_FLEET_TOKEN=<token-from-client-init>
+```
 
-Repo targets are configured in `~/.codex-fleet/repos.json`.
+The MCP tool surface is:
 
-Preferred remote-backed shape:
+- `initialize`
+- `list_targets`
+- `delegate_task`
+- `get_task`
+- `wait_tasks`
+- `list_tasks`
+- `get_task_history`
+- `end_task`
+
+### 6) Repo and shell targets
+
+Repo targets are defined in `~/.codex-fleet/repos.json` using aliases and `remoteUrl` entries:
 
 ```json
 {
   "repos": [
     {
-      "alias": "vps-ops",
-      "remoteUrl": "git@github.com:example/vps-ops.git",
+      "alias": "youknowme",
+      "remoteUrl": "git@github.com:example/youknowme.git",
       "defaultBranch": "main",
       "branchProtected": true,
-      "verifyCommands": ["mise run check"],
+      "verifyCommands": ["mise run lint", "mise run test"],
       "defaultModelTier": "strong"
-    }
   ]
 }
 ```
 
-Fleet keeps mirrors under `~/.codex-fleet/repos` and creates isolated task worktrees from them. `baseCheckout` still exists as a local-development compatibility option, but remote-backed targets are the intended shape.
+For each repo task, Fleet creates and owns:
 
-There is also a shell target. Shell workers start in Fleet-owned scratch space and are instructed not to mutate shared local checkouts.
+- `~/.codex-fleet/repos/<alias>.git` mirror
+- task-specific worktree under `~/.codex-fleet/worktrees/<alias>/<taskShort>`
 
-## Sessions, Tasks, Workers
+Shell targets run in Fleet-owned scratch directories such as `~/.codex-fleet/shell/<taskShort>` and do not use repo worktrees by default.
 
-These are different concepts:
+`baseCheckout` is a compatibility configuration mode and is no longer the standard runtime shape.
 
-- Session: the orchestrator work context, e.g. `claudecowork/observability-upgrade`.
-- Task: one delegated unit of work.
-- Worker: one Codex process executing that task.
+### 7) CLI + TUI usage
 
-For a typical Cowork project, expect one session with several tasks beneath it. Cowork should call `initialize({ sessionName })` early so the TUI can group related workers.
-
-## CLI
-
-Common inspection commands:
+Common CLI commands:
 
 ```sh
 codex-fleet list
 codex-fleet status <taskId>
 codex-fleet logs <taskId>
 codex-fleet watch <taskId>
-```
-
-Cleanup:
-
-```sh
 codex-fleet cleanup list --dry-run
-codex-fleet cleanup run --task <taskId>
-codex-fleet cleanup run --task <taskId> --force
+codex-fleet cleanup run --task <taskId> [--dry-run] [--force]
 codex-fleet cleanup wipe-clean --dry-run
 codex-fleet cleanup wipe-clean
 ```
 
-`wipe-clean` is the local single-operator escape hatch: it removes terminal Fleet-owned repo worktrees, including dirty or ahead-of-base worktrees, and force-deletes Fleet branches when present. It skips live tasks and already-removed worktrees. Durable task records and final responses remain.
-
-## TUI
-
-Run the live dashboard:
+TUI:
 
 ```sh
 codex-fleet-tui
-```
-
-Run with fixture data:
-
-```sh
 codex-fleet-tui --demo
 ```
 
-Render once for debugging:
+TUI `--demo` is for local visualization only and does not show live local task state.
+
+### 8) Safety boundaries and local/private behavior
+
+- `~/.codex-fleet` is local state, logs, task files, sockets, auth tokens, and worktrees. It is not synced or shared by default.
+- Client token files and critical daemon-owned dirs are local-only artifacts for this machine.
+- Shell tasks have broad host access and can execute shell operations. If your workspace hosts untrusted code, run with explicit human review and cleanup discipline.
+- Repo tasks are run in Fleet-owned worktrees and branches. Manual operator checkouts are not intended workspaces.
+- Existing durable task logs and outputs are retained even after cleanup; cleanup removes worktrees/branches, not durable records.
+- Wipe-clean is intentionally destructive and designed for local convenience; it force-removes terminal worktrees and branches.
+
+### 9) Local validation checklist
+
+After installation:
+
+1. Run binary probes:
+
+```sh
+~/.local/bin/codex-fleet --probe
+~/.local/bin/codex-fleet-daemon --probe
+~/.local/bin/codex-fleet-mcp --probe
+~/.local/bin/codex-fleet-tui --probe
+```
+
+2. Start and validate daemon startup:
+
+```sh
+codex-fleet daemon run
+```
+
+In another terminal:
+
+```sh
+CODEX_FLEET_CLIENT_ID=cli codex-fleet list
+```
+
+3. Validate repo plumbing:
+
+```sh
+codex-fleet client init claudecowork --role orchestrator
+~/.local/bin/codex-fleet-mcp --probe
+```
+
+4. Validate UI:
 
 ```sh
 codex-fleet-tui --once --demo --no-color
 ```
 
-Keyboard controls:
+5. Validate cleanup contract:
 
-- `j` / `k` or arrows: move selection.
-- `g` / `G`: first / last visible task.
-- `Tab`: cycle detail mode.
-- `o`, `p`, `r`, `s`: overview, prompt, result, stderr.
-- `x`: wipe clean the Action Queue.
-- `q`: quit.
+```sh
+codex-fleet cleanup list --dry-run
+```
 
-The dashboard shows:
+## Validation and checks
 
-- live, stale, exited, cleanup-pending, and attention counts;
-- session-grouped tasks;
-- selected task details, retained prompt/result/stderr, and recent events;
-- a persistent `CODEX FLEET` logo;
-- daily, weekly, and monthly Codex token totals read from the local Codex SQLite state DB.
+- Runtime/style/type/runtime checks: `mise exec -- bun run check`
+- If you change docs only, prefer `mise exec -- bun run check` plus manual review for usage accuracy.
 
-Token totals are local and best-effort. They are not downloaded and are cached by the TUI for 60 seconds. Demo mode uses fake fixed token values.
+## Internal / design docs
+
+- `docs/DESIGN.md` is the product/design source-of-truth.
+- Operational slices, plans, and historical changes live in `docs/`.
+- If this repo adds a dedicated non-PRD architecture walkthrough in the future, link it from here as `docs/CODE_WALKTHROUGH.md` (currently not present).
 
 ## Development
-
-Read [AGENTS.md](AGENTS.md) before agent-driven changes.
-
-Useful commands:
 
 ```sh
 mise exec -- bun run typecheck
 mise exec -- bun run lint
 mise exec -- bun run format:check
 mise exec -- bun test
-mise exec -- bun run check
 ```
 
-Real Codex E2E tests are opt-in because they spend tokens:
+Real Codex integration tests are opt-in:
 
 ```sh
 mise exec -- bun run test:e2e:codex
 ```
-
-Package layout:
-
-- `packages/shared`: Zod schemas, TypeScript types, RPC contracts.
-- `packages/daemon`: durable daemon, worker lifecycle, repo/worktree/shell ownership.
-- `packages/mcp-adapter`: stateless stdio MCP adapter.
-- `packages/cli`: operator CLI.
-- `packages/tui`: OpenTUI dashboard.
-- `test/integration`: cross-package behavior tests.
-
-`docs/DESIGN.md` is source-of-truth design context and should not be edited by agents. Product/design deviations are recorded as concise DCRs in `docs/`.
