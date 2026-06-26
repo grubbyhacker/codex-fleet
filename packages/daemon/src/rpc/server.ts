@@ -9,6 +9,7 @@ import type { WorkerBackend } from "../workers/backend.js";
 import { appendAuditRecord } from "./audit.js";
 import { authenticate, authorize, ensureStateLayout } from "./auth.js";
 import { errorResponse } from "./errors.js";
+import { verifyPeerUid } from "./peer-credentials.js";
 
 export type RunningDaemon = {
   close: () => Promise<void>;
@@ -28,20 +29,8 @@ export async function startDaemon(
 
   const service = new FleetService(paths, workerBackend);
   const server = net.createServer((socket) => {
-    let buffer = "";
-    socket.setEncoding("utf8");
-    socket.on("data", (chunk) => {
-      buffer += chunk;
-      let newline = buffer.indexOf("\n");
-      while (newline !== -1) {
-        const line = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
-        void handleLine(paths, service, line).then((response) => {
-          socket.write(`${JSON.stringify(response)}\n`);
-        });
-        newline = buffer.indexOf("\n");
-      }
-    });
+    socket.pause();
+    void attachVerifiedSocket(paths, service, socket);
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -60,6 +49,38 @@ export async function startDaemon(
       }
     }
   };
+}
+
+async function attachVerifiedSocket(
+  paths: FleetPaths,
+  service: FleetService,
+  socket: net.Socket
+): Promise<void> {
+  const peer = await verifyPeerUid(socket);
+  if (!peer.ok) {
+    appendAuditRecord(paths.auditPath, {
+      outcome: "rejected",
+      reason: `peer uid rejected: ${peer.reason}`
+    });
+    socket.destroy();
+    return;
+  }
+
+  let buffer = "";
+  socket.setEncoding("utf8");
+  socket.on("data", (chunk) => {
+    buffer += chunk;
+    let newline = buffer.indexOf("\n");
+    while (newline !== -1) {
+      const line = buffer.slice(0, newline);
+      buffer = buffer.slice(newline + 1);
+      void handleLine(paths, service, line).then((response) => {
+        socket.write(`${JSON.stringify(response)}\n`);
+      });
+      newline = buffer.indexOf("\n");
+    }
+  });
+  socket.resume();
 }
 
 function assertNotRoot(): void {
