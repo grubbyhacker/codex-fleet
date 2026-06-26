@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="810" viewBox="0 0 1120 810" role="img" aria-labelledby="title desc">
+  <title id="title">Codex Fleet TUI dashboard screenshot</title>
+  <desc id="desc">A demo Codex Fleet terminal dashboard with task list, selected task details, and recent events.</desc>
+  <rect width="100%" height="100%" rx="14" fill="#0b1020"/>
+  <rect x="1" y="1" width="1118" height="808" rx="13" fill="none" stroke="#263244"/>
+  <text font-family="SFMono-Regular, Menlo, Monaco, Consolas, &apos;Liberation Mono&apos;, monospace" font-size="13.5" xml:space="preserve">
+    <tspan x="24" y="32" fill="#f8fafc">Codex Fleet                                                                                     ___ ___  ___  _____  __ </tspan>
+    <tspan x="24" y="50" fill="#bae6fd">mode overview | selected demo-ui-                                                              / __/ _ \|   \| __\ \/ / </tspan>
+    <tspan x="24" y="68" fill="#bae6fd">LIVE 3 | attention 0 | queued 1 | running 2 | stale 0 | exited 1 | cleanup-pending 0          | (_| (_) | |) | _| &gt;  &lt;  </tspan>
+    <tspan x="24" y="86" fill="#bae6fd">tasks 4 | visible 4 | repos 3 | median-runtime 2160s | longest-runtime 2160s                   \___\___/|___/|___/_/\_\ </tspan>
+    <tspan x="24" y="104" fill="#bae6fd">Codex tokens: today 245k | week 1.9M | month 5.7M                                                    CODEX FLEET        </tspan>
+    <tspan x="24" y="122" fill="#facc15">FOCUS: TASKS                                                                                                            </tspan>
+    <tspan x="24" y="140" fill="#facc15">NAV: h/l/e focus | j/k/up/down move or scroll | PgUp/PgDn jump | g/G first/last                                         </tspan>
+    <tspan x="24" y="158" fill="#facc15">VIEW: o overview   p prompt   r result   s stderr   Tab cycle mode                                                      </tspan>
+    <tspan x="24" y="176" fill="#facc15">OPS: x wipe clean action queue                                                                                          </tspan>
+    <tspan x="24" y="194" fill="#d7e2f0">updated Jun 25, 2026 at 09:50:11 PM PDT                                                                                 </tspan>
+    <tspan x="24" y="212" fill="#d7e2f0">                                                                                                                        </tspan>
+    <tspan x="24" y="230" fill="#cbd5e1">╭ Tasks  ────────────────────────────────────────────────────╮  ╭ Selected  ───────────────────────────────────────────╮</tspan>
+    <tspan x="24" y="248" fill="#cbd5e1">│ Live                                                       │  │ Selected Task                                        │</tspan>
+    <tspan x="24" y="266" fill="#cbd5e1">│   id        state       target          signal             │  │ Task demo-ui-polish-001                              │</tspan>
+    <tspan x="24" y="284" fill="#cbd5e1">│ session orch/ui-polish                                     │  │ Target:   repo codex-fleet                           │</tspan>
+    <tspan x="24" y="302" fill="#86efac">│ &gt;  demo-ui-  [RUNNING]     repo codex-fleet  quiet 1m ago  │  │ Session:  orch/ui-polish                             │</tspan>
+    <tspan x="24" y="320" fill="#86efac">│ session orch/prod-diagnostics                              │  │ State:    [RUNNING]                                  │</tspan>
+    <tspan x="24" y="338" fill="#86efac">│ *  demo-pro  [RUNNING]     shell           quiet 2m ago    │  │ Started:  Jun 25, 2026 at 09:12:11 PM PDT (38m ago)  │</tspan>
+    <tspan x="24" y="356" fill="#cbd5e1">│ session orch/model-routing                                 │  │ Updated:  Jun 25, 2026 at 09:49:11 PM PDT (1m ago)   │</tspan>
+    <tspan x="24" y="374" fill="#86efac">│ *  demo-mod  [QUEUED]      repo youknowme  quiet 7m ago    │  │ Activity: quiet 1m ago                               │</tspan>
+    <tspan x="24" y="392" fill="#cbd5e1">│                                                            │  │                                                      │</tspan>
+    <tspan x="24" y="410" fill="#cbd5e1">│ Recent Results                                             │  │ Prompt                                               │</tspan>
+    <tspan x="24" y="428" fill="#cbd5e1">│ session orch/docs-sync                                     │  │ Make the Codex Fleet dashboard feel like an opera... │</tspan>
+    <tspan x="24" y="446" fill="#a7f3d0">│    demo-doc  [EXITED]      repo agentchatpoc  exit 0       │  │                                                      │</tspan>
+    <tspan x="24" y="464" fill="#cbd5e1">│                                                            │  │ Final Response                                       │</tspan>
+    <tspan x="24" y="482" fill="#cbd5e1">│                                                            │  │ Still running. Recent output says snapshot review... │</tspan>
+    <tspan x="24" y="500" fill="#cbd5e1">│                                                            │  │ Worktree: ~/.codex-fleet/worktrees/codex-fleet/de... │</tspan>
+    <tspan x="24" y="518" fill="#cbd5e1">│                                                            │  │ Branch:   fleet/codex-fleet/ui-polish                │</tspan>
+    <tspan x="24" y="536" fill="#cbd5e1">╰────────────────────────────────────────────────────────────╯  ╰──────────────────────────────────────────────────────╯</tspan>
+    <tspan x="24" y="554" fill="#cbd5e1">╭ Events  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</tspan>
+    <tspan x="24" y="572" fill="#cbd5e1">│ [ ] EVENTS 1-9 of 15                                                                                                 │</tspan>
+    <tspan x="24" y="590" fill="#cbd5e1">│    1 task_created   accepted task                                                                                    │</tspan>
+    <tspan x="24" y="608" fill="#cbd5e1">│    2 task_activity  worker prepared environment and started tool execution                                           │</tspan>
+    <tspan x="24" y="626" fill="#cbd5e1">│    3 task_activity  worker reported live progress                                                                    │</tspan>
+    <tspan x="24" y="644" fill="#cbd5e1">│    4 task_activity  diagnostic-1 for demo-ui-poli: codex-fleet telemetry, lock state, and artifact lifecycle all ... │</tspan>
+    <tspan x="24" y="662" fill="#cbd5e1">│    5 task_activity  diagnostic-2 for demo-ui-poli: codex-fleet telemetry, lock state, and artifact lifecycle all ... │</tspan>
+    <tspan x="24" y="680" fill="#cbd5e1">│    6 task_activity  diagnostic-3 for demo-ui-poli: codex-fleet telemetry, lock state, and artifact lifecycle all ... │</tspan>
+    <tspan x="24" y="698" fill="#cbd5e1">│    7 task_activity  diagnostic-4 for demo-ui-poli: codex-fleet telemetry, lock state, and artifact lifecycle all ... │</tspan>
+    <tspan x="24" y="716" fill="#cbd5e1">│    8 task_activity  diagnostic-5 for demo-ui-poli: codex-fleet telemetry, lock state, and artifact lifecycle all ... │</tspan>
+    <tspan x="24" y="734" fill="#cbd5e1">│    9 task_activity  diagnostic-6 for demo-ui-poli: codex-fleet telemetry, lock state, and artifact lifecycle all ... │</tspan>
+    <tspan x="24" y="752" fill="#cbd5e1">│   v newer lines below                                                                                                │</tspan>
+    <tspan x="24" y="770" fill="#cbd5e1">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</tspan>
+  </text>
+</svg>

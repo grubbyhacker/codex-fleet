@@ -4,6 +4,8 @@ Codex Fleet is a local, single-operator orchestration layer for running multiple
 
 This is a personal research tool, not a supported multi-user product. It works well for the workflow it was built for, but it intentionally runs powerful local agents. Read the safety model before using it on a machine with credentials or production access.
 
+![Codex Fleet TUI dashboard demo](docs/assets/codex-fleet-tui.svg)
+
 ## What It Is
 
 - A long-lived local daemon with durable task state and an authenticated Unix socket.
