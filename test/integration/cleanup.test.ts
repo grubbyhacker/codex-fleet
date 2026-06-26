@@ -11,6 +11,51 @@ import { callDaemon } from "../../packages/daemon/src/rpc/client.js";
 import { startDaemon } from "../../packages/daemon/src/rpc/server.js";
 
 describe("cleanup", () => {
+  it("does not release active task resources before the worker reaches a terminal state", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-active-cleanup-"));
+    const paths = resolveFleetPaths(root);
+    const previousDelay = process.env.CODEX_FLEET_FAKE_WORKER_DELAY_MS;
+    process.env.CODEX_FLEET_FAKE_WORKER_DELAY_MS = "250";
+    const daemon = await startDaemon(paths);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "active shell scratch"
+      })) as { taskId: string };
+      const running = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
+        task: { shellPath?: string; state: string };
+      };
+      expect(running.task.state).toBe("running");
+      expect(existsSync(running.task.shellPath ?? "")).toBe(true);
+
+      await expect(callDaemon(rpc, "end_task", { taskId: delegated.taskId })).rejects.toThrow(
+        "wait for a terminal state"
+      );
+      expect(existsSync(running.task.shellPath ?? "")).toBe(true);
+
+      await callDaemon(rpc, "wait_tasks", {
+        taskIds: [delegated.taskId],
+        sinceEventSeq: 999,
+        maxWaitSeconds: 1,
+        returnOnStatuses: ["exited"]
+      });
+      await callDaemon(rpc, "end_task", { taskId: delegated.taskId });
+      expect(existsSync(running.task.shellPath ?? "")).toBe(false);
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.CODEX_FLEET_FAKE_WORKER_DELAY_MS;
+      } else {
+        process.env.CODEX_FLEET_FAKE_WORKER_DELAY_MS = previousDelay;
+      }
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("allocates and removes Fleet-owned shell scratch directories", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-shell-cleanup-"));
     const paths = resolveFleetPaths(root);
