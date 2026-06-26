@@ -1,8 +1,18 @@
 {
   "name": "codex-fleet",
   "version": "0.0.0",
+  "description": "Local single-operator orchestration for multiple Codex workers.",
   "private": true,
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/grubbyhacker/codex-fleet.git"
+  },
+  "bugs": {
+    "url": "https://github.com/grubbyhacker/codex-fleet/issues"
+  },
+  "homepage": "https://github.com/grubbyhacker/codex-fleet#readme",
   "packageManager": "bun@1.3.14",
   "workspaces": [
     "packages/*"
@@ -10,6 +20,7 @@
   "scripts": {
     "build:bin": "bun run scripts/build-bin.ts",
     "build": "bun run build:bin",
+    "audit:deps": "bun audit",
     "check": "bun run typecheck && bun run lint && bun run format:check && bun run test:all",
     "format": "prettier --write .",
     "format:write": "bun run format",
@@ -18,6 +29,7 @@
     "lint": "eslint .",
     "lint:ci": "bun run lint",
     "lint:fix": "eslint . --fix",
+    "public:check": "bun run check && bun run audit:deps",
     "spike:bun": "bun run scripts/spike-bun.ts",
     "test": "bun run test:all",
     "test:all": "bun run test:unit && bun run test:integration",
