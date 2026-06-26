@@ -130,6 +130,13 @@ export class FleetService {
       case "end_task": {
         const request = endTaskRequestSchema.parse(params);
         const task = this.requireTask(envelope.clientId, request.taskId, client);
+        if (!isTerminalTask(task)) {
+          throw new FleetError(
+            "conflict",
+            `Task "${request.taskId}" is ${task.state}; wait for a terminal state before releasing resources`,
+            "wait_tasks"
+          );
+        }
         const repo = "repo" in task.target ? this.registry.get(task.target.repo) : undefined;
         const cleanup = this.cleanup.releaseWorktree(task, repo);
         return { accepted: true, taskId: request.taskId, cleanup };
@@ -625,6 +632,10 @@ function tierRank(tier: ModelTier): number {
 
 function hasFleetReadAccess(client?: ClientRecord): boolean {
   return client?.role === "cli" || client?.role === "dashboard";
+}
+
+function isTerminalTask(task: TaskSnapshot): boolean {
+  return ["exited", "failed_to_start", "cancelled", "timed_out"].includes(task.state);
 }
 
 function matchesReturnStatus(
