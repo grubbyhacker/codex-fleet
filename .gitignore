@@ -4,6 +4,7 @@ coverage/
 .turbo/
 .cache/
 *.log
+.DS_Store
 
 # Runtime artifacts
 .codex-fleet/

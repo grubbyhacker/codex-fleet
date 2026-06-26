@@ -93,7 +93,7 @@ if (import.meta.main) {
 
 function loadAdapterOptions(): AdapterOptions {
   const paths = resolveFleetPaths();
-  const clientId = process.env.CODEX_FLEET_CLIENT_ID ?? "claudecowork";
+  const clientId = process.env.CODEX_FLEET_CLIENT_ID ?? "orchestrator";
   return {
     clientId,
     token: process.env.CODEX_FLEET_TOKEN ?? readClientToken(paths, clientId),
