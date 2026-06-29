@@ -42,15 +42,21 @@ export function createAdapterServer(options = loadAdapterOptions()): McpServer {
     options,
     "delegate_task",
     delegateTaskRequestSchema,
-    "Start or resume a task."
+    "Start or resume one asynchronous Fleet worker task. Returns immediately with a durable taskId; monitor with wait_tasks rather than blocking here."
   );
-  registerProxyTool(server, options, "get_task", getTaskRequestSchema, "Read one task snapshot.");
+  registerProxyTool(
+    server,
+    options,
+    "get_task",
+    getTaskRequestSchema,
+    "Read one full task snapshot, including retained prompt/output/stderr/resource details. Use after terminal, stale, failed, or unexpected states; do not use for routine polling of quiet running workers."
+  );
   registerProxyTool(
     server,
     options,
     "wait_tasks",
     waitTasksRequestSchema,
-    "Wait briefly for task events and snapshots."
+    "Primary monitoring primitive for active workers. Prefer 30-45s maxWaitSeconds with terminal/stale returnOnStatuses, carry sinceEventSeq forward, and keep waiting instead of returning control while workers are merely quiet."
   );
   registerProxyTool(
     server,
@@ -64,7 +70,7 @@ export function createAdapterServer(options = loadAdapterOptions()): McpServer {
     options,
     "get_task_history",
     getTaskHistoryRequestSchema,
-    "Read recent task events."
+    "Read recent task events when a final response or state transition needs explanation. Use for debugging or audit context, not normal wait-loop polling."
   );
   registerProxyTool(
     server,

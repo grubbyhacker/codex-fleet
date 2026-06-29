@@ -26,6 +26,7 @@
     "format:write": "bun run format",
     "format:check": "prettier --check .",
     "install:bin": "bun run build:bin && bun run scripts/install-bin.ts",
+    "install:fleet-skill": "bun run scripts/install-fleet-skill.ts",
     "lint": "eslint .",
     "lint:ci": "bun run lint",
     "lint:fix": "eslint . --fix",
