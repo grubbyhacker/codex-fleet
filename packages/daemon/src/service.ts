@@ -38,6 +38,7 @@ import {
 } from "./store/state.js";
 import { WorkerRunError, type WorkerBackend } from "./workers/backend.js";
 import { workerBackendFromEnv } from "./workers/codex-backend.js";
+import { dirtyWorktreeStopHook } from "./workers/dirty-worktree-stop-hook.js";
 import { WorktreeManager } from "./worktree/worktree-manager.js";
 
 type WorktreePostRunStatus = {
@@ -231,7 +232,11 @@ export class FleetService {
       state: "running",
       lastActivityAt: createdAt
     } satisfies TaskStatePayload);
-    void this.runWorker({ taskId, request, repoBaseCheckout, branch, worktreePath, shellPath });
+    const workerInput = { taskId, request, repoBaseCheckout, branch, worktreePath, shellPath };
+    void this.runWorker({
+      ...workerInput,
+      stopHook: dirtyWorktreeStopHook(this.paths, workerInput)
+    });
 
     return { taskId };
   }
@@ -264,7 +269,7 @@ export class FleetService {
       "repo" in task.target && !task.worktreePath
         ? this.registry.get(task.target.repo)?.baseCheckout
         : undefined;
-    void this.runWorker({
+    const workerInput = {
       taskId: task.id,
       request,
       repoBaseCheckout,
@@ -272,6 +277,10 @@ export class FleetService {
       worktreePath: task.worktreePath,
       shellPath: task.shellPath,
       codexThreadId: task.codexThreadId
+    };
+    void this.runWorker({
+      ...workerInput,
+      stopHook: dirtyWorktreeStopHook(this.paths, workerInput)
     });
 
     return { taskId: task.id };
