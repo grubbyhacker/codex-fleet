@@ -37,7 +37,7 @@ export class CodexWorkerBackend implements WorkerBackend {
     const cwd = input.worktreePath ?? input.repoBaseCheckout ?? input.shellPath ?? process.cwd();
     const transport = new StdioClientTransport({
       command: resolveCodexCommand(),
-      args: ["mcp-server"],
+      args: codexWorkerCommandArgs(input),
       cwd,
       stderr: "pipe"
     });
@@ -128,6 +128,21 @@ export function codexWorkerToolArguments(input: WorkerInput, cwd: string): Recor
     "approval-policy": "never",
     "developer-instructions": workerInstructions(input)
   });
+}
+
+export function codexWorkerCommandArgs(input: WorkerInput): string[] {
+  if (!input.stopHook) {
+    return ["mcp-server"];
+  }
+
+  return [
+    "--dangerously-bypass-hook-trust",
+    "mcp-server",
+    "-c",
+    "features.hooks=true",
+    "-c",
+    stopHookConfigOverride(input.stopHook)
+  ];
 }
 
 function codexToolCall(
@@ -325,6 +340,22 @@ function isTimeoutError(error: unknown): boolean {
 
 function stripUndefined<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
+}
+
+function stopHookConfigOverride(stopHook: NonNullable<WorkerInput["stopHook"]>): string {
+  const fields = [
+    'type="command"',
+    `command=${tomlString(stopHook.command)}`,
+    `timeout=${stopHook.timeoutSeconds}`,
+    stopHook.statusMessage ? `statusMessage=${tomlString(stopHook.statusMessage)}` : undefined
+  ]
+    .filter((field): field is string => Boolean(field))
+    .join(",");
+  return `hooks.Stop=[{hooks=[{${fields}}]}]`;
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value);
 }
 
 function preview(value: string, maxLength = 500): string {

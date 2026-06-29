@@ -13,7 +13,14 @@ export type WorkerInput = {
   shellPath?: string;
   branch?: string;
   codexThreadId?: string;
+  stopHook?: WorkerStopHook;
   onActivity?: (activity: WorkerActivity) => void;
+};
+
+export type WorkerStopHook = {
+  command: string;
+  timeoutSeconds: number;
+  statusMessage?: string;
 };
 
 export type WorkerResult = {

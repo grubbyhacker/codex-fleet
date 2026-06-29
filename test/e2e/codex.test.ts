@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -91,6 +91,56 @@ describeCodex("real codex e2e", () => {
       rmSync(root, { force: true, recursive: true });
     }
   }, 180_000);
+
+  it("nudges a dirty review worktree before allowing stop", async () => {
+    const model = process.env.CODEX_FLEET_E2E_MODEL ?? "gpt-5.3-codex-spark";
+    console.warn(`Running paid Codex stop-hook E2E with model ${model}`);
+
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-e2e-stop-hook-"));
+    const repo = join(root, "base-repo");
+    initRepo(repo);
+    const paths = resolveFleetPaths(join(root, "fleet"));
+    mkdirSync(paths.rootDir, { recursive: true });
+    writeFileSync(
+      paths.reposPath,
+      `${JSON.stringify({
+        repos: [{ alias: "fixture", baseCheckout: repo, defaultBranch: "main" }]
+      })}\n`
+    );
+    const restoreEnv = useCodexBackend(model);
+    const daemon = await startDaemon(paths);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { repo: "fixture" },
+        deliveryMode: "pr_for_review",
+        modelTier: "cheap",
+        prompt:
+          "Reply exactly: codex-fleet-stop-hook-e2e-ok. Do not modify files, run git commands, commit, push, or open a PR."
+      })) as { taskId: string };
+      const started = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
+        task: { worktreePath?: string };
+      };
+      writeFileSync(join(started.task.worktreePath ?? "", "DIRTY.txt"), "dirty\n");
+
+      const task = await waitForExit(rpc, delegated.taskId);
+      const attemptsPath = join(
+        paths.tasksDir,
+        "stop-hook-attempts",
+        `${delegated.taskId}.attempts`
+      );
+      const attempts = existsSync(attemptsPath)
+        ? Number.parseInt(readFileSync(attemptsPath, "utf8"), 10)
+        : 0;
+      expect((task.task.workerStderr ?? "").includes("Stop Blocked") || attempts > 0).toBe(true);
+    } finally {
+      restoreEnv();
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  }, 240_000);
 });
 
 async function runCodexPreflight(model: string): Promise<string> {
@@ -160,7 +210,12 @@ async function waitForExit(
   rpc: { socketPath: string; clientId: string; token: string },
   taskId: string
 ): Promise<{
-  task: { state: string; finalResponsePreview?: string; worktreePath?: string };
+  task: {
+    state: string;
+    finalResponsePreview?: string;
+    worktreePath?: string;
+    workerStderr?: string;
+  };
 }> {
   let sinceEventSeq = 1;
   for (let attempt = 0; attempt < 12; attempt += 1) {
@@ -169,17 +224,34 @@ async function waitForExit(
       sinceEventSeq,
       maxWaitSeconds: 10
     })) as {
-      snapshots: Array<{ state: string; finalResponsePreview?: string; worktreePath?: string }>;
+      snapshots: Array<{
+        state: string;
+        finalResponsePreview?: string;
+        worktreePath?: string;
+        workerStderr?: string;
+      }>;
       events: Array<{ seq: number }>;
     };
     sinceEventSeq = Math.max(sinceEventSeq, ...waited.events.map((event) => event.seq));
     const snapshot = waited.snapshots[0];
     if (snapshot?.state === "exited") {
-      return { task: snapshot };
+      return (await callDaemon(rpc, "get_task", { taskId })) as {
+        task: {
+          state: string;
+          finalResponsePreview?: string;
+          worktreePath?: string;
+          workerStderr?: string;
+        };
+      };
     }
   }
   return (await callDaemon(rpc, "get_task", { taskId })) as {
-    task: { state: string; finalResponsePreview?: string; worktreePath?: string };
+    task: {
+      state: string;
+      finalResponsePreview?: string;
+      worktreePath?: string;
+      workerStderr?: string;
+    };
   };
 }
 

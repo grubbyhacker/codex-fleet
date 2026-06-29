@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   captureTextStream,
+  codexWorkerCommandArgs,
   codexWorkerResultFromToolResult,
   codexWorkerToolArguments,
   resolveCodexCommand
@@ -65,6 +66,43 @@ describe("codex worker backend", () => {
       sandbox: "danger-full-access",
       "approval-policy": "never"
     });
+  });
+
+  it("launches codex mcp-server without hook args by default", () => {
+    const args = codexWorkerCommandArgs({
+      taskId: "task-no-hook",
+      request: {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        risk: "standard",
+        prompt: "Inspect gh availability"
+      }
+    });
+
+    expect(args).toEqual(["mcp-server"]);
+  });
+
+  it("places hook trust bypass before mcp-server when a stop hook is configured", () => {
+    const args = codexWorkerCommandArgs({
+      taskId: "task-hook",
+      stopHook: {
+        command: "CODEX_FLEET_STOP_HOOK_MAX_NUDGES='2' '/tmp/fleet hook.sh'",
+        timeoutSeconds: 10,
+        statusMessage: "Checking Fleet worktree"
+      },
+      request: {
+        target: { repo: "fixture" },
+        deliveryMode: "pr_for_review",
+        risk: "standard",
+        prompt: "Open a PR"
+      }
+    });
+
+    expect(args.slice(0, 2)).toEqual(["--dangerously-bypass-hook-trust", "mcp-server"]);
+    expect(args).toContain("features.hooks=true");
+    expect(args.join(" ")).toContain("hooks.Stop");
+    expect(args.join(" ")).toContain("Checking Fleet worktree");
+    expect(args.join(" ")).toContain("/tmp/fleet hook.sh");
   });
 
   it("warns shell workers away from mutating shared repo checkouts", () => {
