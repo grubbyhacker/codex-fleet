@@ -23,6 +23,7 @@ export function dirtyWorktreeStopHook(
   return {
     command: [
       `CODEX_FLEET_STOP_HOOK_ATTEMPTS_FILE=${shellQuote(attemptPath)}`,
+      `CODEX_FLEET_STOP_HOOK_DELIVERY_MODE=${shellQuote(input.request.deliveryMode)}`,
       `CODEX_FLEET_STOP_HOOK_MAX_NUDGES=${shellQuote(String(maxNudges()))}`,
       `CODEX_FLEET_GIT_PATH=${shellQuote(resolveGitExecutable())}`,
       shellQuote(scriptPath)
@@ -71,6 +72,7 @@ set -u
 
 git_path=\${CODEX_FLEET_GIT_PATH:-git}
 attempt_file=\${CODEX_FLEET_STOP_HOOK_ATTEMPTS_FILE:-}
+delivery_mode=\${CODEX_FLEET_STOP_HOOK_DELIVERY_MODE:-unknown}
 max_nudges=\${CODEX_FLEET_STOP_HOOK_MAX_NUDGES:-${DEFAULT_MAX_NUDGES}}
 
 case "$max_nudges" in
@@ -112,6 +114,21 @@ if [ -n "$attempt_file" ]; then
 fi
 
 dirty_files=$(printf '%s\\n' "$status" | sed '/^$/d' | wc -l | tr -d ' ')
-printf '{"decision":"block","reason":"Fleet stop hook: worktree has %s uncommitted file(s). Resolve the dirty worktree or report the exact blocker before stopping. Nudge %s/%s."}\\n' "$dirty_files" "$next_attempt" "$max_nudges"
+case "$delivery_mode" in
+  pr_for_review)
+    guidance='This pr_for_review task must not stop with a dirty worktree. Do not discard intended changes. Stage and commit intended work, push the branch, open or report the PR URL, then stop with a clean worktree. If blocked, report git status --short and the exact blocker.'
+    ;;
+  full_delivery)
+    guidance='This full_delivery task must not stop with a dirty worktree. Do not discard intended changes. Reconcile the source-of-truth repo state, commit/push/merge or report exactly what remains, verify remote state, then stop with a clean worktree. If blocked, report git status --short and the exact blocker.'
+    ;;
+  push_to_main)
+    guidance='This push_to_main task must not stop with a dirty worktree. Do not discard intended changes. Stage and commit intended work, push to the default branch or report the exact blocker, then stop with a clean worktree. If blocked, report git status --short and the exact blocker.'
+    ;;
+  *)
+    guidance='Do not discard intended changes. Resolve the dirty worktree according to the delivery contract, or report git status --short and the exact blocker before stopping.'
+    ;;
+esac
+
+printf '{"decision":"block","reason":"Fleet stop hook: worktree has %s uncommitted file(s). %s Nudge %s/%s."}\\n' "$dirty_files" "$guidance" "$next_attempt" "$max_nudges"
 `;
 }

@@ -80,6 +80,7 @@ describe("dirty worktree stop hook", () => {
 
       expect(hook).toBeTruthy();
       expect(hook?.command).toContain(paths.hooksDir);
+      expect(hook?.command).toContain("CODEX_FLEET_STOP_HOOK_DELIVERY_MODE='full_delivery'");
       expect(hook?.command).toContain(join(paths.tasksDir, "stop-hook-attempts"));
       expect(existsSync(join(paths.hooksDir, "dirty-worktree-stop-hook.sh"))).toBe(true);
     } finally {
@@ -103,6 +104,10 @@ describe("dirty worktree stop hook", () => {
       writeFileSync(join(repo, "dirty.txt"), "dirty\n");
       const first = runHook(scriptPath, repo, attemptsPath);
       expect(first).toContain('"decision":"block"');
+      expect(first).toContain("This pr_for_review task must not stop with a dirty worktree");
+      expect(first).toContain("Do not discard intended changes");
+      expect(first).toContain("push the branch, open or report the PR URL");
+      expect(first).toContain("git status --short");
       expect(first).toContain("Nudge 1/2");
       expect(readFileSync(attemptsPath, "utf8")).toBe("1\n");
 
@@ -121,9 +126,37 @@ describe("dirty worktree stop hook", () => {
       rmSync(root, { force: true, recursive: true });
     }
   });
+
+  it("emits delivery-mode-specific guidance", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-stop-hook-guidance-"));
+    const repo = join(root, "repo");
+    const paths = resolveFleetPaths(join(root, "fleet"));
+    const attemptsPath = join(paths.tasksDir, "stop-hook-attempts", "task-guidance.attempts");
+
+    try {
+      initRepo(repo);
+      writeFileSync(join(repo, "dirty.txt"), "dirty\n");
+      const scriptPath = ensureDirtyWorktreeStopHookScript(paths);
+
+      expect(runHook(scriptPath, repo, attemptsPath, "full_delivery")).toContain(
+        "Reconcile the source-of-truth repo state"
+      );
+      rmSync(attemptsPath, { force: true });
+      expect(runHook(scriptPath, repo, attemptsPath, "push_to_main")).toContain(
+        "push to the default branch"
+      );
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
 });
 
-function runHook(scriptPath: string, cwd: string, attemptsPath: string): string {
+function runHook(
+  scriptPath: string,
+  cwd: string,
+  attemptsPath: string,
+  deliveryMode = "pr_for_review"
+): string {
   return execFileSync(scriptPath, {
     cwd,
     encoding: "utf8",
@@ -131,6 +164,7 @@ function runHook(scriptPath: string, cwd: string, attemptsPath: string): string 
       ...process.env,
       CODEX_FLEET_GIT_PATH: "git",
       CODEX_FLEET_STOP_HOOK_ATTEMPTS_FILE: attemptsPath,
+      CODEX_FLEET_STOP_HOOK_DELIVERY_MODE: deliveryMode,
       CODEX_FLEET_STOP_HOOK_MAX_NUDGES: "2"
     }
   });
