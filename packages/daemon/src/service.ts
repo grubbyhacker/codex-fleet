@@ -55,6 +55,8 @@ type WorktreePostRunStatus = {
   inspectionError?: string;
 };
 
+type WorkerRunInput = Parameters<WorkerBackend["run"]>[0];
+
 export class FleetService {
   private readonly eventLog: EventLog;
   private readonly state: FleetState;
@@ -286,41 +288,104 @@ export class FleetService {
     return { taskId: task.id };
   }
 
-  private async runWorker(input: Parameters<WorkerBackend["run"]>[0]): Promise<void> {
+  private async runWorker(input: WorkerRunInput): Promise<void> {
     let lastActivityEventAt = 0;
-    const activityInput = {
-      ...input,
-      onActivity: (activity: Parameters<NonNullable<typeof input.onActivity>>[0]) => {
+    const withActivity = (workerInput: WorkerRunInput): WorkerRunInput => ({
+      ...workerInput,
+      onActivity: (activity: Parameters<NonNullable<typeof workerInput.onActivity>>[0]) => {
         const nowMs = Date.now();
         if (nowMs - lastActivityEventAt < 10_000) {
           return;
         }
         lastActivityEventAt = nowMs;
-        this.append("task_activity", input.taskId, {
+        this.append("task_activity", workerInput.taskId, {
           lastActivityAt: new Date(nowMs).toISOString(),
           kind: activity.kind,
           detail: activity.detail
         } satisfies TaskActivityPayload);
       }
-    };
+    });
 
     try {
-      const result = await this.workerBackend.run(activityInput);
-      const worktreeStatus = this.inspectWorktreeAfterRun(input);
-      if (worktreeStatus) {
-        this.append("worktree_status", input.taskId, worktreeStatus);
+      let currentInput = input;
+      let repairAttempts = 0;
+      const maxRepairAttempts = deliveryRepairMaxAttempts();
+
+      while (true) {
+        const result = await this.workerBackend.run(withActivity(currentInput));
+        const worktreeStatus = this.inspectWorktreeAfterRun(currentInput);
+        if (worktreeStatus) {
+          this.append("worktree_status", currentInput.taskId, worktreeStatus);
+        }
+
+        const repairReasons = deliveryRepairReasons(
+          currentInput.request.deliveryMode,
+          worktreeStatus
+        );
+        if (repairReasons.length > 0 && repairAttempts < maxRepairAttempts) {
+          repairAttempts += 1;
+          const repairPrompt = deliveryRepairPrompt(
+            currentInput.request.deliveryMode,
+            worktreeStatus,
+            repairReasons,
+            repairAttempts,
+            maxRepairAttempts
+          );
+          this.append("delivery_repair", currentInput.taskId, {
+            attempt: repairAttempts,
+            maxAttempts: maxRepairAttempts,
+            reasons: repairReasons,
+            prompt: repairPrompt,
+            promptPreview: preview(repairPrompt)
+          });
+          this.append("task_resumed", currentInput.taskId, {
+            prompt: repairPrompt,
+            promptPreview: preview(repairPrompt),
+            deliveryMode: currentInput.request.deliveryMode,
+            risk: currentInput.request.risk,
+            requestedModel: currentInput.request.modelTier
+          });
+          this.append("task_state", currentInput.taskId, {
+            state: "running",
+            codexThreadId: result.codexThreadId,
+            lastActivityAt: new Date().toISOString()
+          } satisfies TaskStatePayload);
+          currentInput = {
+            ...currentInput,
+            request: {
+              ...currentInput.request,
+              prompt: repairPrompt
+            },
+            codexThreadId: result.codexThreadId ?? currentInput.codexThreadId
+          };
+          continue;
+        }
+
+        const finalAttention = [...(worktreeStatus?.attention ?? [])];
+        if (repairReasons.length > 0 && maxRepairAttempts > 0) {
+          const exhausted = `Fleet post-check: delivery repair attempts exhausted after ${repairAttempts} attempt(s); worktree preserved for orchestrator follow-up.`;
+          finalAttention.push(exhausted);
+          this.append("delivery_repair_exhausted", currentInput.taskId, {
+            attempts: repairAttempts,
+            maxAttempts: maxRepairAttempts,
+            reasons: repairReasons,
+            attention: exhausted
+          });
+        }
+
+        const finalResponse = appendFleetPostCheck(result.finalResponse, finalAttention);
+        this.append("task_state", currentInput.taskId, {
+          state: "exited",
+          exitCode: result.exitCode,
+          finalResponse,
+          finalResponsePreview: preview(finalResponse, 500),
+          workerStderr: result.workerStderr,
+          workerStderrPreview: result.workerStderrPreview,
+          codexThreadId: result.codexThreadId,
+          lastActivityAt: new Date().toISOString()
+        } satisfies TaskStatePayload);
+        return;
       }
-      const finalResponse = appendFleetPostCheck(result.finalResponse, worktreeStatus?.attention);
-      this.append("task_state", input.taskId, {
-        state: "exited",
-        exitCode: result.exitCode,
-        finalResponse,
-        finalResponsePreview: preview(finalResponse, 500),
-        workerStderr: result.workerStderr,
-        workerStderrPreview: result.workerStderrPreview,
-        codexThreadId: result.codexThreadId,
-        lastActivityAt: new Date().toISOString()
-      } satisfies TaskStatePayload);
     } catch (error) {
       const workerStderr = error instanceof WorkerRunError ? error.workerStderr : undefined;
       this.append("task_state", input.taskId, {
@@ -542,6 +607,89 @@ function worktreeAttention(deliveryMode: DeliveryMode, status: WorktreePostRunSt
     );
   }
   return attention;
+}
+
+function deliveryRepairReasons(
+  deliveryMode: DeliveryMode,
+  status: WorktreePostRunStatus | undefined
+): string[] {
+  if (!status || !deliveryRepairModes.has(deliveryMode)) {
+    return [];
+  }
+
+  const reasons: string[] = [];
+  if ((status.dirtyFiles ?? 0) > 0) {
+    reasons.push(`worktree has ${status.dirtyFiles} uncommitted file(s)`);
+  }
+  if (deliveryMode === "pr_for_review" && status.aheadOfBase === 0) {
+    reasons.push(`branch has no commits ahead of ${status.baseBranch ?? "the base branch"}`);
+  }
+  return reasons;
+}
+
+const deliveryRepairModes = new Set<DeliveryMode>([
+  "pr_for_review",
+  "full_delivery",
+  "push_to_main"
+]);
+
+function deliveryRepairMaxAttempts(): number {
+  const parsed = Number.parseInt(process.env.CODEX_FLEET_DELIVERY_REPAIR_MAX_ATTEMPTS ?? "", 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2;
+}
+
+function deliveryRepairPrompt(
+  deliveryMode: DeliveryMode,
+  status: WorktreePostRunStatus | undefined,
+  reasons: string[],
+  attempt: number,
+  maxAttempts: number
+): string {
+  const statusLines = status
+    ? [
+        `- Worktree: ${status.worktreePath}`,
+        status.branch ? `- Branch: ${status.branch}` : undefined,
+        status.baseBranch ? `- Base: ${status.baseBranch}` : undefined,
+        `- Dirty files: ${status.dirtyFiles ?? "unknown"}`,
+        `- Staged files: ${status.stagedFiles ?? "unknown"}`,
+        `- Unstaged files: ${status.unstagedFiles ?? "unknown"}`,
+        `- Untracked files: ${status.untrackedFiles ?? "unknown"}`,
+        status.aheadOfBase !== undefined
+          ? `- Commits ahead of base: ${status.aheadOfBase}`
+          : undefined,
+        status.behindBase !== undefined ? `- Commits behind base: ${status.behindBase}` : undefined
+      ].filter((line): line is string => Boolean(line))
+    : ["- Worktree status unavailable"];
+
+  return [
+    "Resume and finish the Fleet delivery contract. Your previous response did not satisfy Fleet postconditions.",
+    "",
+    `Repair attempt ${attempt}/${maxAttempts}.`,
+    `Delivery mode: ${deliveryMode}.`,
+    `Postcondition failure: ${reasons.join("; ")}.`,
+    "",
+    "Current Fleet worktree status:",
+    ...statusLines,
+    "",
+    "Do not discard intended changes. Inspect the worktree, preserve useful work, and reconcile it according to the delivery contract.",
+    deliveryModeRepairInstruction(deliveryMode),
+    "If you are blocked, stop only after reporting `git status --short`, the exact blocker, and what state is preserved."
+  ].join("\n");
+}
+
+function deliveryModeRepairInstruction(deliveryMode: DeliveryMode): string {
+  switch (deliveryMode) {
+    case "pr_for_review":
+      return "For pr_for_review, stage and commit intended changes, push the branch, open or report the ready PR URL, and stop with a clean worktree.";
+    case "full_delivery":
+      return "For full_delivery, stage and commit intended changes, push/open/merge as required by the repo and prompt, verify remote state, and stop with a clean worktree.";
+    case "push_to_main":
+      return "For push_to_main, stage and commit intended changes, push the requested default-branch change, and stop with a clean worktree.";
+    case "patch":
+      return "For patch, report the preserved diff and blocker.";
+    case "research_only":
+      return "For research_only, report the blocker without mutating the repository further.";
+  }
 }
 
 function appendFleetPostCheck(response: string, attention: string[] | undefined): string {

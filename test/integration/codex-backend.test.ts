@@ -101,6 +101,7 @@ describe("codex worker backend", () => {
     expect(args.slice(0, 2)).toEqual(["--dangerously-bypass-hook-trust", "mcp-server"]);
     expect(args).toContain("features.hooks=true");
     expect(args.join(" ")).toContain("hooks.Stop");
+    expect(args.join(" ")).toContain('type="command"');
     expect(args.join(" ")).toContain("Checking Fleet worktree");
     expect(args.join(" ")).toContain("/tmp/fleet hook.sh");
   });
@@ -127,6 +128,27 @@ describe("codex worker backend", () => {
     expect(args["developer-instructions"]).toContain("do not mutate shared repo checkouts");
     expect(args["developer-instructions"]).toContain("repo target is required");
     expect(args["developer-instructions"]).not.toContain("commit, push, open a PR");
+  });
+
+  it("warns shell diagnostics workers to bound broad scans", () => {
+    const args = codexWorkerToolArguments(
+      {
+        taskId: "task-shell-diagnostics",
+        shellPath: "/tmp/codex-fleet-shell/task-shell-diagnostics",
+        request: {
+          target: { shell: true },
+          deliveryMode: "research_only",
+          risk: "standard",
+          prompt: "Investigate disk usage"
+        }
+      },
+      "/tmp/codex-fleet-shell/task-shell-diagnostics"
+    );
+
+    expect(args["developer-instructions"]).toContain("Shell diagnostics guardrail");
+    expect(args["developer-instructions"]).toContain("du -xhd1");
+    expect(args["developer-instructions"]).toContain("Use command-level timeouts");
+    expect(args["developer-instructions"]).toContain("return partial findings");
   });
 
   it("refuses push-to-main semantics for shell workers", () => {
