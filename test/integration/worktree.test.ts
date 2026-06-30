@@ -30,6 +30,12 @@ describe("repo registry and worktree isolation", () => {
             branchProtected: true,
             verifyCommands: ["bun test"],
             defaultModelTier: "standard"
+          },
+          {
+            alias: "unprotected",
+            baseCheckout: repo,
+            defaultBranch: "main",
+            branchProtected: false
           }
         ]
       })}\n`
@@ -41,9 +47,15 @@ describe("repo registry and worktree isolation", () => {
 
     try {
       const targets = (await callDaemon(rpc, "list_targets", {})) as {
-        targets: Array<{ id: string }>;
+        targets: Array<{ id: string; mergePolicy?: string }>;
       };
       expect(targets.targets.map((target) => target.id)).toContain("fixture");
+      expect(targets.targets.find((target) => target.id === "fixture")?.mergePolicy).toBe(
+        "human_review"
+      );
+      expect(targets.targets.find((target) => target.id === "unprotected")?.mergePolicy).toBe(
+        "agent_merge_explicit"
+      );
 
       const first = (await callDaemon(rpc, "delegate_task", {
         target: { repo: "fixture" },
@@ -333,9 +345,13 @@ describe("repo registry and worktree isolation", () => {
 
     let runs = 0;
     let worktreePath = "";
+    let repairPrompt = "";
     const backend: WorkerBackend = {
       run(input) {
         runs += 1;
+        if (runs === 2) {
+          repairPrompt = input.request.prompt;
+        }
         worktreePath = input.worktreePath ?? "";
         writeFileSync(join(worktreePath, "REVIEW.md"), `dirty ${runs}\n`);
         return {
@@ -361,6 +377,9 @@ describe("repo registry and worktree isolation", () => {
       expect(runs).toBe(2);
       expect(task.task.finalResponse).toContain("delivery repair attempts exhausted");
       expect(readFileSync(join(worktreePath, "REVIEW.md"), "utf8")).toBe("dirty 2\n");
+      expect(repairPrompt).toContain("Repo merge policy: human_review");
+      expect(repairPrompt).toContain("Do not merge your own PR");
+      expect(repairPrompt).toContain("stop before merge");
 
       const history = (await callDaemon(rpc, "get_task_history", {
         taskId: delegated.taskId

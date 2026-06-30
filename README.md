@@ -170,6 +170,7 @@ Repo targets live in `~/.codex-fleet/repos.json`:
       "remoteUrl": "git@github.com:example/example-app.git",
       "defaultBranch": "main",
       "branchProtected": true,
+      "mergePolicy": "human_review",
       "verifyCommands": ["mise run lint", "mise run test"],
       "defaultModelTier": "strong"
     }
@@ -186,6 +187,14 @@ For each repo task, Fleet manages:
 Shell tasks run in Fleet-owned scratch directories under `~/.codex-fleet/shell/<taskShort>`.
 
 `baseCheckout` exists as a compatibility mode for local development, but remote-backed mirrors are the preferred public shape.
+
+`mergePolicy` is an instructional repo policy, not a credential boundary:
+
+- `human_review`: workers may push branches and open/update ready PRs, then stop before merge.
+- `agent_merge_explicit`: workers may merge only when the task prompt explicitly instructs that PR to be merged.
+- `agent_merge_allowed`: workers may merge when the delivery mode, prompt, repo rules, and checks allow it.
+
+If omitted, protected repos default to `human_review`; unprotected repos default to `agent_merge_explicit`.
 
 ## CLI And TUI
 

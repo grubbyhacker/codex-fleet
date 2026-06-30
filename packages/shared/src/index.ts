@@ -29,6 +29,13 @@ export type Risk = z.infer<typeof riskSchema>;
 export const modelTierSchema = z.enum(["cheap", "standard", "strong"]);
 export type ModelTier = z.infer<typeof modelTierSchema>;
 
+export const mergePolicySchema = z.enum([
+  "human_review",
+  "agent_merge_explicit",
+  "agent_merge_allowed"
+]);
+export type MergePolicy = z.infer<typeof mergePolicySchema>;
+
 export const taskStateSchema = z.enum([
   "queued",
   "running",
@@ -59,7 +66,8 @@ export const targetDescriptorSchema = z.object({
   availableModelTiers: z.array(modelTierSchema).min(1),
   verifyCommands: z.array(z.string().min(1)).optional(),
   defaultBranch: z.string().min(1).optional(),
-  branchProtected: z.boolean().optional()
+  branchProtected: z.boolean().optional(),
+  mergePolicy: mergePolicySchema.optional()
 });
 export type TargetDescriptor = z.infer<typeof targetDescriptorSchema>;
 

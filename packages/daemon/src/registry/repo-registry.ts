@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 
-import { modelTierSchema, type TargetDescriptor } from "@codex-fleet/shared";
+import {
+  mergePolicySchema,
+  modelTierSchema,
+  type MergePolicy,
+  type TargetDescriptor
+} from "@codex-fleet/shared";
 import { z } from "zod";
 
 import type { FleetPaths } from "../paths.js";
@@ -13,9 +18,14 @@ export const repoConfigSchema = z
     baseCheckout: z.string().min(1).optional(),
     defaultBranch: z.string().min(1).default("main"),
     branchProtected: z.boolean().default(true),
+    mergePolicy: mergePolicySchema.optional(),
     verifyCommands: z.array(z.string().min(1)).default([]),
     defaultModelTier: modelTierSchema.default("standard")
   })
+  .transform((repo) => ({
+    ...repo,
+    mergePolicy: repo.mergePolicy ?? defaultMergePolicy(repo.branchProtected)
+  }))
   .refine((repo) => repo.remoteUrl || repo.baseCheckout, {
     message: "repo config requires remoteUrl or baseCheckout"
   });
@@ -49,11 +59,16 @@ export class RepoRegistry {
       availableModelTiers: ["cheap", "standard", "strong"],
       verifyCommands: repo.verifyCommands,
       defaultBranch: repo.defaultBranch,
-      branchProtected: repo.branchProtected
+      branchProtected: repo.branchProtected,
+      mergePolicy: repo.mergePolicy
     }));
   }
 
   get(alias: string): RepoConfig | undefined {
     return this.repos.find((repo) => repo.alias === alias);
   }
+}
+
+function defaultMergePolicy(branchProtected: boolean): MergePolicy {
+  return branchProtected ? "human_review" : "agent_merge_explicit";
 }

@@ -45,6 +45,12 @@ Risk values:
 - `standard`
 - `high`
 
+Repo merge policies:
+
+- `human_review`: open/update a ready PR and stop before merge.
+- `agent_merge_explicit`: merge only when the task prompt explicitly instructs that PR to be merged.
+- `agent_merge_allowed`: merge when delivery mode, prompt, repo rules, and checks allow it.
+
 ## Typical Repo Delegation
 
 ```json
@@ -53,7 +59,7 @@ Risk values:
   "deliveryMode": "pr_for_review",
   "risk": "low",
   "modelTier": "standard",
-  "prompt": "Treat CLAUDE.md the same as AGENTS.md. Read repo guidance first. Work in Fleet-owned task resources only. Implement the requested change, run the documented validation, open a PR for review, and report the branch, commit, PR URL, validation results, and any residual risks."
+  "prompt": "Treat CLAUDE.md the same as AGENTS.md. Read repo guidance first. Work in Fleet-owned task resources only. Respect the target repo merge policy from list_targets. Implement the requested change, run the documented validation, open a PR for review, and report the branch, commit, PR URL, validation results, and any residual risks."
 }
 ```
 

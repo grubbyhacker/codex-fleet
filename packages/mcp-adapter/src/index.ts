@@ -35,7 +35,7 @@ export function createAdapterServer(options = loadAdapterOptions()): McpServer {
     options,
     "list_targets",
     z.object({}),
-    "List repos and shell targets available to this client."
+    "List repos and shell targets available to this client, including repo mergePolicy guidance when present."
   );
   registerProxyTool(
     server,
