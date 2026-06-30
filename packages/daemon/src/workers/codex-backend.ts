@@ -194,6 +194,7 @@ function workerInstructions(input: WorkerInput): string {
     input.branch ? `Branch: ${input.branch}` : undefined,
     workspace,
     largeArtifactInstructions(),
+    "shell" in input.request.target ? boundedShellDiagnosticsInstructions() : undefined,
     deliveryModeInstructions(input),
     "Keep responses concise and report concrete paths and commands."
   ]
@@ -206,6 +207,14 @@ function largeArtifactInstructions(): string {
     "Large artifact/context guardrail: for generated dashboards, lockfiles, vendored data, snapshots, or other large files, avoid loading or emitting whole files when a targeted edit will work.",
     "Use structured tools such as jq, formatters, or small scripts to make narrow changes; inspect focused slices and verify with targeted checks.",
     "If the task requires both broad investigation and a large rewrite, do the smallest safe edit or stop and report that the work should be split into smaller tasks."
+  ].join(" ");
+}
+
+function boundedShellDiagnosticsInstructions(): string {
+  return [
+    "Shell diagnostics guardrail: bound broad host inspections so the MCP call can return a useful report.",
+    "For disk or filesystem investigations, prefer df, docker system summaries, known paths, and top-level du such as `du -xhd1`; avoid broad recursive scans over /, /var, Docker storage, or remote hosts.",
+    "Use command-level timeouts where scans might hang or run long, and return partial findings plus the blocked command instead of waiting indefinitely."
   ].join(" ");
 }
 

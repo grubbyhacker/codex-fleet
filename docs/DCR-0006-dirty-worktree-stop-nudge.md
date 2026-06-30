@@ -1,6 +1,6 @@
 # DCR-0006: Dirty Worktree Stop Nudge
 
-Status: Accepted
+Status: Superseded by DCR-0007
 Date: 2026-06-29
 
 ## Context

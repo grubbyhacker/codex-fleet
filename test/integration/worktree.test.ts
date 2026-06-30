@@ -189,22 +189,41 @@ describe("repo registry and worktree isolation", () => {
     }
   });
 
-  it("reports review tasks that leave uncommitted files and empty branches", async () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-fleet-worktree-postcheck-"));
+  it("auto-repairs review tasks that leave uncommitted files", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-worktree-repair-"));
     const repo = join(root, "base-repo");
     initRepo(repo);
 
     const paths = resolveFleetPaths(join(root, "fleet"));
     writeRepoRegistry(paths.rootDir, paths.reposPath, repo);
 
+    let runs = 0;
+    let repairPrompt = "";
     const backend: WorkerBackend = {
       run(input) {
-        writeFileSync(join(input.worktreePath ?? "", "REVIEW.md"), "draft review notes\n");
+        runs += 1;
+        if (runs === 1) {
+          writeFileSync(join(input.worktreePath ?? "", "REVIEW.md"), "draft review notes\n");
+          return {
+            exitCode: 0,
+            finalResponse: "worker says done",
+            finalResponsePreview: "worker says done",
+            codexThreadId: `fake-thread-${input.taskId}`
+          };
+        }
+
+        repairPrompt = input.request.prompt;
+        expect(input.codexThreadId).toBe(`fake-thread-${input.taskId}`);
+        execFileSync("git", ["add", "REVIEW.md"], {
+          cwd: input.worktreePath,
+          stdio: "ignore"
+        });
+        commit(input.worktreePath ?? "", "Add review notes");
         return {
           exitCode: 0,
-          finalResponse: "worker says done",
-          finalResponsePreview: "worker says done",
-          codexThreadId: `fake-thread-${input.taskId}`
+          finalResponse: "repair complete",
+          finalResponsePreview: "repair complete",
+          codexThreadId: input.codexThreadId
         };
       }
     };
@@ -220,16 +239,18 @@ describe("repo registry and worktree isolation", () => {
       })) as { taskId: string };
 
       const task = await waitUntilExited(rpc, delegated.taskId);
-      expect(task.task.finalResponse).toContain("worker says done");
-      expect(task.task.finalResponse).toContain("worktree has 1 uncommitted file(s)");
-      expect(task.task.finalResponse).toContain("branch has no commits ahead of main");
+      expect(runs).toBe(2);
+      expect(task.task.finalResponse).toContain("repair complete");
+      expect(task.task.finalResponse).not.toContain("worktree has 1 uncommitted file(s)");
+      expect(repairPrompt).toContain("Resume and finish the Fleet delivery contract");
+      expect(repairPrompt).toContain("worktree has 1 uncommitted file(s)");
 
       const history = (await callDaemon(rpc, "get_task_history", {
         taskId: delegated.taskId
       })) as { events: Array<{ type: string; summary: string }> };
-      const worktreeStatus = history.events.find((event) => event.type === "worktree_status");
-      expect(worktreeStatus).toBeTruthy();
-      expect(JSON.parse(worktreeStatus?.summary ?? "{}")).toMatchObject({
+      const worktreeStatuses = history.events.filter((event) => event.type === "worktree_status");
+      expect(worktreeStatuses).toHaveLength(2);
+      expect(JSON.parse(worktreeStatuses[0]?.summary ?? "{}")).toMatchObject({
         dirtyFiles: 1,
         untrackedFiles: 1,
         aheadOfBase: 0,
@@ -238,6 +259,161 @@ describe("repo registry and worktree isolation", () => {
           "Fleet post-check: branch has no commits ahead of main."
         ]
       });
+      expect(JSON.parse(worktreeStatuses[1]?.summary ?? "{}")).toMatchObject({
+        dirtyFiles: 0,
+        aheadOfBase: 1,
+        attention: []
+      });
+      expect(history.events).toContainEqual(expect.objectContaining({ type: "delivery_repair" }));
+      expect(history.events).toContainEqual(expect.objectContaining({ type: "task_resumed" }));
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("auto-repairs clean review branches with no commits", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-worktree-empty-review-repair-"));
+    const repo = join(root, "base-repo");
+    initRepo(repo);
+
+    const paths = resolveFleetPaths(join(root, "fleet"));
+    writeRepoRegistry(paths.rootDir, paths.reposPath, repo);
+
+    let runs = 0;
+    const backend: WorkerBackend = {
+      run(input) {
+        runs += 1;
+        if (runs === 2) {
+          writeFileSync(join(input.worktreePath ?? "", "REVIEW.md"), "ready for review\n");
+          execFileSync("git", ["add", "REVIEW.md"], {
+            cwd: input.worktreePath,
+            stdio: "ignore"
+          });
+          commit(input.worktreePath ?? "", "Add review notes");
+          expect(input.request.prompt).toContain("branch has no commits ahead of main");
+        }
+        return {
+          exitCode: 0,
+          finalResponse: runs === 1 ? "nothing to do" : "review branch repaired",
+          finalResponsePreview: runs === 1 ? "nothing to do" : "review branch repaired",
+          codexThreadId: input.codexThreadId ?? `fake-thread-${input.taskId}`
+        };
+      }
+    };
+    const daemon = await startDaemon(paths, backend);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { repo: "fixture" },
+        deliveryMode: "pr_for_review",
+        prompt: "open a PR"
+      })) as { taskId: string };
+
+      const task = await waitUntilExited(rpc, delegated.taskId);
+      expect(runs).toBe(2);
+      expect(task.task.finalResponse).toContain("review branch repaired");
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("stops after bounded repair attempts and preserves the dirty worktree", async () => {
+    const previousMaxAttempts = process.env.CODEX_FLEET_DELIVERY_REPAIR_MAX_ATTEMPTS;
+    process.env.CODEX_FLEET_DELIVERY_REPAIR_MAX_ATTEMPTS = "1";
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-worktree-repair-exhausted-"));
+    const repo = join(root, "base-repo");
+    initRepo(repo);
+
+    const paths = resolveFleetPaths(join(root, "fleet"));
+    writeRepoRegistry(paths.rootDir, paths.reposPath, repo);
+
+    let runs = 0;
+    let worktreePath = "";
+    const backend: WorkerBackend = {
+      run(input) {
+        runs += 1;
+        worktreePath = input.worktreePath ?? "";
+        writeFileSync(join(worktreePath, "REVIEW.md"), `dirty ${runs}\n`);
+        return {
+          exitCode: 0,
+          finalResponse: `still dirty ${runs}`,
+          finalResponsePreview: `still dirty ${runs}`,
+          codexThreadId: input.codexThreadId ?? `fake-thread-${input.taskId}`
+        };
+      }
+    };
+    const daemon = await startDaemon(paths, backend);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { repo: "fixture" },
+        deliveryMode: "full_delivery",
+        prompt: "finish delivery"
+      })) as { taskId: string };
+
+      const task = await waitUntilExited(rpc, delegated.taskId);
+      expect(runs).toBe(2);
+      expect(task.task.finalResponse).toContain("delivery repair attempts exhausted");
+      expect(readFileSync(join(worktreePath, "REVIEW.md"), "utf8")).toBe("dirty 2\n");
+
+      const history = (await callDaemon(rpc, "get_task_history", {
+        taskId: delegated.taskId
+      })) as { events: Array<{ type: string; summary: string }> };
+      expect(history.events).toContainEqual(
+        expect.objectContaining({ type: "delivery_repair_exhausted" })
+      );
+    } finally {
+      restoreEnv("CODEX_FLEET_DELIVERY_REPAIR_MAX_ATTEMPTS", previousMaxAttempts);
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("does not auto-repair patch tasks with dirty worktrees", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-worktree-patch-no-repair-"));
+    const repo = join(root, "base-repo");
+    initRepo(repo);
+
+    const paths = resolveFleetPaths(join(root, "fleet"));
+    writeRepoRegistry(paths.rootDir, paths.reposPath, repo);
+
+    let runs = 0;
+    const backend: WorkerBackend = {
+      run(input) {
+        runs += 1;
+        writeFileSync(join(input.worktreePath ?? "", "PATCH.md"), "patch diff\n");
+        return {
+          exitCode: 0,
+          finalResponse: "patch ready",
+          finalResponsePreview: "patch ready",
+          codexThreadId: `fake-thread-${input.taskId}`
+        };
+      }
+    };
+    const daemon = await startDaemon(paths, backend);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { repo: "fixture" },
+        deliveryMode: "patch",
+        prompt: "make a patch"
+      })) as { taskId: string };
+
+      const task = await waitUntilExited(rpc, delegated.taskId);
+      expect(runs).toBe(1);
+      expect(task.task.finalResponse).toContain("patch ready");
+      const history = (await callDaemon(rpc, "get_task_history", {
+        taskId: delegated.taskId
+      })) as { events: Array<{ type: string }> };
+      expect(history.events.some((event) => event.type === "delivery_repair")).toBe(false);
     } finally {
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });
@@ -261,6 +437,14 @@ async function waitUntilExited(
   return (await callDaemon(rpc, "get_task", { taskId })) as {
     task: { state: string; finalResponse?: string };
   };
+}
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
 }
 
 function writeRepoRegistry(rootDir: string, reposPath: string, repo: string): void {
