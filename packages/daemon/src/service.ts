@@ -234,7 +234,15 @@ export class FleetService {
       state: "running",
       lastActivityAt: createdAt
     } satisfies TaskStatePayload);
-    const workerInput = { taskId, request, repoBaseCheckout, branch, worktreePath, shellPath };
+    const workerInput = {
+      taskId,
+      request,
+      repoBaseCheckout,
+      branch,
+      worktreePath,
+      shellPath,
+      mergePolicy: repoForWorktree?.mergePolicy
+    };
     void this.runWorker({
       ...workerInput,
       stopHook: dirtyWorktreeStopHook(this.paths, workerInput)
@@ -278,6 +286,8 @@ export class FleetService {
       branch: task.branch,
       worktreePath: task.worktreePath,
       shellPath: task.shellPath,
+      mergePolicy:
+        "repo" in task.target ? this.registry.get(task.target.repo)?.mergePolicy : undefined,
       codexThreadId: task.codexThreadId
     };
     void this.runWorker({
@@ -326,6 +336,7 @@ export class FleetService {
           repairAttempts += 1;
           const repairPrompt = deliveryRepairPrompt(
             currentInput.request.deliveryMode,
+            currentInput.mergePolicy,
             worktreeStatus,
             repairReasons,
             repairAttempts,
@@ -640,6 +651,7 @@ function deliveryRepairMaxAttempts(): number {
 
 function deliveryRepairPrompt(
   deliveryMode: DeliveryMode,
+  mergePolicy: WorkerRunInput["mergePolicy"],
   status: WorktreePostRunStatus | undefined,
   reasons: string[],
   attempt: number,
@@ -672,18 +684,44 @@ function deliveryRepairPrompt(
     ...statusLines,
     "",
     "Do not discard intended changes. Inspect the worktree, preserve useful work, and reconcile it according to the delivery contract.",
-    deliveryModeRepairInstruction(deliveryMode),
+    mergePolicyRepairInstruction(mergePolicy),
+    deliveryModeRepairInstruction(deliveryMode, mergePolicy),
     "If you are blocked, stop only after reporting `git status --short`, the exact blocker, and what state is preserved."
   ].join("\n");
 }
 
-function deliveryModeRepairInstruction(deliveryMode: DeliveryMode): string {
+function mergePolicyRepairInstruction(mergePolicy: WorkerRunInput["mergePolicy"]): string {
+  switch (mergePolicy) {
+    case "human_review":
+      return "Repo merge policy: human_review. Do not merge your own PR or push directly to the default branch. Open or update a ready PR, wait for CI/check status when available, report the PR URL and check results, then stop.";
+    case "agent_merge_explicit":
+      return "Repo merge policy: agent_merge_explicit. Do not merge unless the current prompt explicitly instructs you to merge this PR. Otherwise stop after a ready PR and check status.";
+    case "agent_merge_allowed":
+      return "Repo merge policy: agent_merge_allowed. You may merge when the delivery mode, prompt, repository rules, and checks all allow it.";
+    default:
+      return "Repo merge policy: unspecified. Do not assume merge authority; prefer stopping after a ready PR and check status unless the prompt explicitly says to merge.";
+  }
+}
+
+function deliveryModeRepairInstruction(
+  deliveryMode: DeliveryMode,
+  mergePolicy: WorkerRunInput["mergePolicy"]
+): string {
   switch (deliveryMode) {
     case "pr_for_review":
       return "For pr_for_review, stage and commit intended changes, push the branch, open or report the ready PR URL, and stop with a clean worktree.";
     case "full_delivery":
+      if (mergePolicy === "human_review") {
+        return "For full_delivery under human_review, stage and commit intended changes, push the branch, open or update a ready PR, wait for CI/check status when practical, report the PR URL and checks, and stop before merge.";
+      }
+      if (mergePolicy === "agent_merge_explicit") {
+        return "For full_delivery under agent_merge_explicit, stage and commit intended changes, push/open/update the PR, and merge only if the current task prompt explicitly instructs this PR to be merged.";
+      }
       return "For full_delivery, stage and commit intended changes, push/open/merge as required by the repo and prompt, verify remote state, and stop with a clean worktree.";
     case "push_to_main":
+      if (mergePolicy === "human_review") {
+        return "For push_to_main under human_review, do not push directly to the default branch; report that this repo requires a PR for human review.";
+      }
       return "For push_to_main, stage and commit intended changes, push the requested default-branch change, and stop with a clean worktree.";
     case "patch":
       return "For patch, report the preserved diff and blocker.";

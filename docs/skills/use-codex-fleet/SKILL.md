@@ -55,7 +55,7 @@ Choose the smallest delivery mode that matches the requested outcome:
 - `research_only`: inspect, answer, diagnose, or produce a plan. Prefer this for fact-finding and repo questions.
 - `patch`: make local changes without promising a PR.
 - `pr_for_review`: create a branch/PR for human review. This is the normal choice for repo changes.
-- `full_delivery`: carry implementation through validation and any requested delivery steps.
+- `full_delivery`: carry implementation through validation and requested delivery steps, but respect the repo's merge policy. In `human_review` repos, full delivery stops after a ready PR and CI/check status.
 - `push_to_main`: use only when the user explicitly wants direct main-branch delivery.
 
 Choose the target deliberately:
@@ -78,6 +78,7 @@ Give workers all operational boundaries up front:
 - repo or shell target and the requested delivery mode;
 - whether to treat `CLAUDE.md` the same as `AGENTS.md`;
 - branch, PR, validation, or merge expectations;
+- the repo merge policy shown by `list_targets` when merge behavior matters;
 - what not to touch;
 - whether production, live services, or shared checkouts are off limits;
 - when to stop and report rather than improvise.

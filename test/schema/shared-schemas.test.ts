@@ -5,6 +5,7 @@ import {
   delegateTaskRequestSchema,
   methodParamsSchemas,
   rpcEnvelopeSchema,
+  targetDescriptorSchema,
   waitTasksRequestSchema
 } from "@codex-fleet/shared";
 
@@ -56,6 +57,19 @@ describe("shared schemas", () => {
     });
 
     expect(parsed.error.nextCall).toBe("list_tasks");
+  });
+
+  it("accepts merge policy on target descriptors", () => {
+    const parsed = targetDescriptorSchema.parse({
+      id: "codex-fleet",
+      target: { repo: "codex-fleet" },
+      title: "codex-fleet",
+      defaultModelTier: "strong",
+      availableModelTiers: ["cheap", "standard", "strong"],
+      mergePolicy: "human_review"
+    });
+
+    expect(parsed.mergePolicy).toBe("human_review");
   });
 
   it("has params schemas for every public daemon method", () => {

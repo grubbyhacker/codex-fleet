@@ -195,6 +195,7 @@ function workerInstructions(input: WorkerInput): string {
     workspace,
     largeArtifactInstructions(),
     "shell" in input.request.target ? boundedShellDiagnosticsInstructions() : undefined,
+    "repo" in input.request.target ? mergePolicyInstructions(input) : undefined,
     deliveryModeInstructions(input),
     "Keep responses concise and report concrete paths and commands."
   ]
@@ -218,9 +219,36 @@ function boundedShellDiagnosticsInstructions(): string {
   ].join(" ");
 }
 
+function mergePolicyInstructions(input: WorkerInput): string {
+  switch (input.mergePolicy) {
+    case "human_review":
+      return "Repo merge policy human_review: do not merge your own PR, do not approve your own PR, and do not push directly to the default branch. For delivery modes that would otherwise merge, stop after pushing the branch, opening/updating a ready PR, and reporting CI/check status.";
+    case "agent_merge_explicit":
+      return "Repo merge policy agent_merge_explicit: do not merge unless this task prompt explicitly instructs you to merge this PR. If merge is not explicit, stop after a ready PR and CI/check status.";
+    case "agent_merge_allowed":
+      return "Repo merge policy agent_merge_allowed: you may merge when the delivery mode, task prompt, repository rules, and checks all allow it.";
+    default:
+      return "Repo merge policy unspecified: do not assume merge authority. Prefer stopping after a ready PR and CI/check status unless the prompt explicitly says to merge.";
+  }
+}
+
 function deliveryModeInstructions(input: WorkerInput): string {
   if ("shell" in input.request.target) {
     return shellDeliveryModeInstructions(input);
+  }
+  if (input.mergePolicy === "human_review") {
+    switch (input.request.deliveryMode) {
+      case "full_delivery":
+        return "Delivery mode full_delivery under human_review: implement, verify, commit, push, open or update a ready PR, wait for CI/check status when practical, report the PR URL and checks, then stop before merge.";
+      case "push_to_main":
+        return "Delivery mode push_to_main conflicts with repo merge policy human_review. Do not push directly to the default branch; report that this repo requires a PR for human review.";
+    }
+  }
+  if (
+    input.mergePolicy === "agent_merge_explicit" &&
+    input.request.deliveryMode === "full_delivery"
+  ) {
+    return "Delivery mode full_delivery under agent_merge_explicit: implement, verify, commit, push, and open or update a ready PR. Merge only if this task prompt explicitly instructs you to merge this PR; otherwise report PR URL/checks and stop before merge.";
   }
   switch (input.request.deliveryMode) {
     case "research_only":

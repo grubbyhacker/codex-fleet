@@ -194,6 +194,54 @@ describe("codex worker backend", () => {
     );
   });
 
+  it("turns full delivery into PR handoff for human-review repos", () => {
+    const args = codexWorkerToolArguments(
+      {
+        taskId: "task-human-review",
+        branch: "fleet/fixture/task-human-review",
+        worktreePath: "/tmp/codex-fleet-worker",
+        mergePolicy: "human_review",
+        request: {
+          target: { repo: "fixture" },
+          deliveryMode: "full_delivery",
+          risk: "standard",
+          prompt: "Implement a docs update"
+        }
+      },
+      "/tmp/codex-fleet-worker"
+    );
+
+    expect(args["developer-instructions"]).toContain("Repo merge policy human_review");
+    expect(args["developer-instructions"]).toContain("do not merge your own PR");
+    expect(args["developer-instructions"]).toContain("stop after pushing the branch");
+    expect(args["developer-instructions"]).toContain("stop before merge");
+    expect(args["developer-instructions"]).not.toContain("carry through merge");
+  });
+
+  it("allows merge only with explicit prompt authority for explicit-merge repos", () => {
+    const args = codexWorkerToolArguments(
+      {
+        taskId: "task-explicit-merge",
+        branch: "fleet/fixture/task-explicit-merge",
+        worktreePath: "/tmp/codex-fleet-worker",
+        mergePolicy: "agent_merge_explicit",
+        request: {
+          target: { repo: "fixture" },
+          deliveryMode: "full_delivery",
+          risk: "standard",
+          prompt: "Implement a docs update"
+        }
+      },
+      "/tmp/codex-fleet-worker"
+    );
+
+    expect(args["developer-instructions"]).toContain("Repo merge policy agent_merge_explicit");
+    expect(args["developer-instructions"]).toContain(
+      "Merge only if this task prompt explicitly instructs"
+    );
+    expect(args["developer-instructions"]).toContain("stop before merge");
+  });
+
   it("warns workers to avoid whole-file rewrites for large artifacts", () => {
     const args = codexWorkerToolArguments(
       {
