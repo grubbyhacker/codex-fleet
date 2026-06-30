@@ -237,6 +237,30 @@ describe("tui dashboard", () => {
     expect(rendered).not.toContain("No final response yet");
   });
 
+  it("wraps retained prompts to the selected pane instead of truncating them", () => {
+    const selected = task({
+      id: "long-prompt-task-id",
+      state: "running",
+      createdAt: "2026-06-18T17:45:00.000Z",
+      updatedAt: "2026-06-18T17:55:00.000Z",
+      lastActivityAt: "2026-06-18T17:55:00.000Z",
+      prompt:
+        "Design and implement a durable retention cleanup mechanism for sampled worker runs. Preserve metadata, final deliverables, logs, and safe-by-default behavior."
+    });
+    const rendered = renderDashboard(
+      {
+        collectedAt: "2026-06-18T18:00:00.000Z",
+        histories: {},
+        tasks: [selected]
+      },
+      { color: false, mode: "prompt", width: 120 }
+    );
+
+    expect(rendered).toContain("durable retention cleanup");
+    expect(rendered).toContain("safe-by-default behavior");
+    expect(rendered).not.toContain("durable retention cleanup mechanism for sampled worker...");
+  });
+
   it("promotes terminal tasks with retained worktrees as attention items", () => {
     const worktreePath = mkdtempSync(join(tmpdir(), "codex-fleet-tui-worktree-"));
     try {

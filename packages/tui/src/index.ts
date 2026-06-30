@@ -1076,7 +1076,7 @@ function renderWideDashboard(
     options.focus
   );
   const detailWindow = viewportWindow(
-    view.detailLines,
+    wrapDetailLines(view.detailLines, Math.max(1, rightWidth - 4)),
     mainInnerLines,
     options.detailScroll ?? 0,
     "DETAIL",
@@ -1148,7 +1148,7 @@ function renderStackedDashboard(
   }
 
   const selectedTaskScroll = viewportWindow(
-    view.detailLines,
+    wrapDetailLines(view.detailLines, Math.max(1, width - 4)),
     detailInner,
     options.detailScroll ?? 0,
     "DETAIL",
@@ -1345,6 +1345,55 @@ function renderBox(
     ),
     style(bottom, isFocused ? "focusBorder" : "border", options)
   ];
+}
+
+function wrapDetailLines(lines: string[], width: number): string[] {
+  return lines.flatMap((line) => wrapDisplayLine(line, Math.max(8, width)));
+}
+
+function wrapDisplayLine(value: string, width: number): string[] {
+  const plain = stripAnsi(value).replaceAll("\t", "  ");
+  if (plain.length <= width) {
+    return [value];
+  }
+
+  const labeled = plain.match(/^(\s*[^:\n]{1,24}:\s+)(\S.*)$/);
+  if (labeled) {
+    return wrapLineWithPrefixes(
+      labeled[2] ?? "",
+      width,
+      labeled[1] ?? "",
+      " ".repeat((labeled[1] ?? "").length)
+    );
+  }
+  return wrapText(plain, width);
+}
+
+function wrapLineWithPrefixes(
+  value: string,
+  width: number,
+  firstPrefix: string,
+  continuationPrefix: string
+): string[] {
+  const lines: string[] = [];
+  let remaining = value.trimEnd();
+  let prefix = firstPrefix;
+
+  while (remaining.length > 0) {
+    const available = Math.max(8, width - prefix.length);
+    if (remaining.length <= available) {
+      lines.push(`${prefix}${remaining}`);
+      break;
+    }
+
+    const splitAt = remaining.lastIndexOf(" ", available);
+    const index = splitAt > 8 ? splitAt : available;
+    lines.push(`${prefix}${remaining.slice(0, index)}`);
+    remaining = remaining.slice(index).trimStart();
+    prefix = continuationPrefix;
+  }
+
+  return lines.length > 0 ? lines : [firstPrefix.trimEnd()];
 }
 
 function padLines(lines: string[], targetLength: number): string[] {

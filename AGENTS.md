@@ -8,6 +8,8 @@
 - `../agentchatpoc` is read-only inspiration. Do not modify it, and prefer `docs/DESIGN.md` when the prototype disagrees with the design.
 - Keep `docs/` as the home for design documents, DCRs, and future operational docs.
 - Keep `agent-handoff.md` concise and high-level. If it exceeds 500 lines, compact old entries automatically before appending new ones.
+- After implementing and validating repo changes, commit them, push the branch, and open a ready-for-review PR unless the operator explicitly says not to publish.
+- Do not leave validated code changes only in the local worktree as the final state of a task.
 
 ## Runtime And Tooling
 
