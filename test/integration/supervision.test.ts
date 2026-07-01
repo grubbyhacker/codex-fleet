@@ -109,6 +109,62 @@ describe("supervision and waiting", () => {
     }
   });
 
+  it("returns an observation event when a running worker is quiet for a wait slice", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-quiet-observation-"));
+    const paths = resolveFleetPaths(root);
+    const client = createClient(paths, "orch", "orchestrator");
+    let releaseWorker: (() => void) | undefined;
+    const backend: WorkerBackend = {
+      async run(input) {
+        await new Promise<void>((resolve) => {
+          releaseWorker = resolve;
+        });
+        return {
+          exitCode: 0,
+          finalResponse: "done",
+          finalResponsePreview: "done",
+          codexThreadId: `fake-thread-${input.taskId}`
+        };
+      }
+    };
+    const daemon = await startDaemon(paths, backend);
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "quiet observation"
+      })) as { taskId: string };
+
+      const waited = (await callDaemon(rpc, "wait_tasks", {
+        taskIds: [delegated.taskId],
+        sinceEventSeq: 999,
+        maxWaitSeconds: 1,
+        returnOnStatuses: ["exited", "failed_to_start", "cancelled", "timed_out", "stale"]
+      })) as {
+        events: Array<{ type: string; summary: string; seq: number }>;
+        snapshots: Array<{ state: string; lastActivityAt?: string }>;
+      };
+
+      expect(waited.snapshots[0]?.state).toBe("running");
+      expect(waited.events).toHaveLength(1);
+      expect(waited.events[0]?.type).toBe("task_observation");
+      expect(JSON.parse(waited.events[0]?.summary ?? "{}")).toMatchObject({
+        state: "running",
+        lastActivityAt: waited.snapshots[0]?.lastActivityAt
+      });
+
+      releaseWorker?.();
+      const terminal = await waitForState(rpc, delegated.taskId, "exited");
+      expect(terminal.task.state).toBe("exited");
+    } finally {
+      releaseWorker?.();
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("records worker timeouts as timed_out", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-worker-timeout-"));
     const paths = resolveFleetPaths(root);
