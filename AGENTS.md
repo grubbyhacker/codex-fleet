@@ -8,8 +8,21 @@
 - `../agentchatpoc` is read-only inspiration. Do not modify it, and prefer `docs/DESIGN.md` when the prototype disagrees with the design.
 - Keep `docs/` as the home for design documents, DCRs, and future operational docs.
 - Keep `agent-handoff.md` concise and high-level. If it exceeds 500 lines, compact old entries automatically before appending new ones.
-- After implementing and validating repo changes, commit them, push the branch, and open a ready-for-review PR unless the operator explicitly says not to publish.
-- Do not leave validated code changes only in the local worktree as the final state of a task.
+- Repo-mutating tasks should not end as loose local edits. After implementing and validating, agents should have committed changes on a feature branch, pushed it, opened a normal ready-for-review PR, and reported validation results plus clean task worktree state.
+- Do not leave validated repo changes only in the local worktree as the final state of a task.
+- Never open draft PRs unless the operator explicitly requests draft mode.
+- Code review is the human gate: agents must not self-merge unless explicitly directed to do so.
+- PR completion should be reconciled from durable artifacts (branch/worktree state, task/workflow results, CI checks) and not from worker prose alone.
+- If a PR is merged, cleanup should include:
+  - `git fetch --all --prune` (or equivalent),
+  - switch to `main`/default branch,
+  - fast-forward to `origin/main`,
+  - delete the merged local task branch,
+  - push remote branch deletion if needed,
+  - remove the task worktree,
+  - confirm clean workspace and current branch.
+- If an agent cannot produce a ready PR, it must report the exact dirty files and the blocking reason, not silently leave the tree dirty.
+- Before claiming completion, run at least one sanity validation for docs-only changes (or a brief note that fuller checks were intentionally skipped); full checks should be reported explicitly when omitted.
 
 ## Runtime And Tooling
 
