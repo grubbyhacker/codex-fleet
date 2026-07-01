@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   captureTextStream,
+  CodexEventTelemetry,
   codexWorkerCommandArgs,
   codexWorkerResultFromToolResult,
   codexWorkerToolArguments,
@@ -329,6 +330,45 @@ describe("codex worker backend", () => {
     stream.write("ignored\n");
 
     expect(capture.read()).toBe("second line\n");
+  });
+
+  it("extracts redacted command telemetry from codex events", () => {
+    const telemetry = new CodexEventTelemetry();
+    const started = telemetry.activity({
+      method: "codex/event",
+      params: {
+        msg: {
+          type: "exec_command_begin",
+          call_id: "call-1",
+          command: "gh api /repos/example/actions -H Authorization: Bearer github_pat_secret123"
+        }
+      }
+    });
+    const ended = telemetry.activity({
+      method: "codex/event",
+      params: {
+        msg: {
+          type: "exec_command_end",
+          call_id: "call-1",
+          exit_code: 0
+        }
+      }
+    });
+
+    expect(started).toMatchObject({
+      eventType: "exec_command_begin",
+      callId: "call-1",
+      important: true
+    });
+    expect(started.commandPreview).toContain("Authorization: Bearer <redacted>");
+    expect(started.commandPreview).not.toContain("github_pat_secret123");
+    expect(ended).toMatchObject({
+      eventType: "exec_command_end",
+      callId: "call-1",
+      exitCode: 0,
+      important: true
+    });
+    expect(ended.durationMs).toBeGreaterThanOrEqual(0);
   });
 });
 

@@ -18,6 +18,13 @@ type DashboardData = {
   codexUsage?: CodexUsageSummary;
 };
 
+type DashboardDataCache = {
+  selectedTaskId?: string;
+  selectedUpdatedAt?: string;
+  detailedTask?: TaskSnapshot;
+  history?: Event[];
+};
+
 type DashboardOptions = {
   taskId?: string;
   showAll?: boolean;
@@ -52,6 +59,10 @@ const terminalStates = new Set<TaskState>(["exited", "failed_to_start", "cancell
 const liveStates = new Set<TaskState>(["queued", "running"]);
 const freshTerminalWindowMs = 30 * 60 * 1_000;
 const freshStaleWindowMs = 10 * 60 * 1_000;
+const dashboardRefreshIntervalMs = parsePositiveNumber(
+  process.env.CODEX_FLEET_TUI_REFRESH_MS,
+  5_000
+);
 const maxDefaultTerminalRows = 8;
 const ansiEscapePattern = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 const localDateTimeFormatter = new Intl.DateTimeFormat("en-US", {
@@ -361,6 +372,7 @@ async function runDashboard(): Promise<void> {
   let eventScroll = baseOptions.eventScroll ?? 0;
   const perTaskDetailScroll = new Map<string, number>();
   const perTaskEventScroll = new Map<string, number>();
+  const dataCache: DashboardDataCache = {};
   let notice: string | undefined;
   let lastData: DashboardData | undefined;
   let initialContent: string | StyledText;
@@ -375,7 +387,7 @@ async function runDashboard(): Promise<void> {
       detailScroll,
       eventScroll
     };
-    const data = await loadDashboardData(options);
+    const data = await loadDashboardData(options, dataCache);
     lastData = data;
     selectedTaskId = selectedTask(data, options)?.id;
     if (selectedTaskId) {
@@ -414,7 +426,7 @@ async function runDashboard(): Promise<void> {
         notice,
         taskId: selectedTaskId
       };
-      const data = await loadDashboardData(options);
+      const data = await loadDashboardData(options, dataCache);
       lastData = data;
       const nextSelected = selectedTask(data, options)?.id;
       if (previousTaskId !== nextSelected) {
@@ -552,7 +564,7 @@ async function runDashboard(): Promise<void> {
     void refresh();
   });
 
-  const timer = setInterval(() => void refresh(), 1_000);
+  const timer = setInterval(() => void refresh(), dashboardRefreshIntervalMs);
   renderer.on("destroy", () => clearInterval(timer));
 }
 
@@ -610,7 +622,10 @@ function renderDashboardForOpenTui(
   return options.color ? ansiToStyledText(rendered) : rendered;
 }
 
-async function loadDashboardData(options: DashboardOptions = {}): Promise<DashboardData> {
+async function loadDashboardData(
+  options: DashboardOptions = {},
+  cache?: DashboardDataCache
+): Promise<DashboardData> {
   if (process.argv.includes("--demo")) {
     return demoDashboardData();
   }
@@ -625,15 +640,29 @@ async function loadDashboardData(options: DashboardOptions = {}): Promise<Dashbo
     options.taskId
   );
   if (selected) {
-    const detailed = (await callDaemon(rpc, "get_task", { taskId: selected.id })) as {
-      task: TaskSnapshot;
-    };
-    tasks = tasks.map((task) => (task.id === selected.id ? detailed.task : task));
-    const result = (await callDaemon(rpc, "get_task_history", {
-      taskId: selected.id,
-      limit: 24
-    })) as { events: Event[] };
-    histories[selected.id] = result.events;
+    const cached =
+      cache?.selectedTaskId === selected.id && cache.selectedUpdatedAt === selected.updatedAt;
+    let detailedTask = cached ? cache?.detailedTask : undefined;
+    let history = cached ? cache?.history : undefined;
+    if (!detailedTask || !history) {
+      const detailed = (await callDaemon(rpc, "get_task", { taskId: selected.id })) as {
+        task: TaskSnapshot;
+      };
+      detailedTask = detailed.task;
+      const result = (await callDaemon(rpc, "get_task_history", {
+        taskId: selected.id,
+        limit: 24
+      })) as { events: Event[] };
+      history = result.events;
+      if (cache) {
+        cache.selectedTaskId = selected.id;
+        cache.selectedUpdatedAt = selected.updatedAt;
+        cache.detailedTask = detailedTask;
+        cache.history = history;
+      }
+    }
+    tasks = tasks.map((task) => (task.id === selected.id ? detailedTask : task));
+    histories[selected.id] = history;
   }
   return { tasks, histories, collectedAt, codexUsage };
 }
@@ -965,6 +994,14 @@ function parseIntFlag(rawValue: string | undefined, label: string): number | und
     throw new Error(`invalid ${label}: expected a non-negative integer`);
   }
   return parsed;
+}
+
+function parsePositiveNumber(rawValue: string | undefined, fallback: number): number {
+  if (rawValue === undefined || rawValue === "") {
+    return fallback;
+  }
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function nextMode(current: DashboardMode): DashboardMode {

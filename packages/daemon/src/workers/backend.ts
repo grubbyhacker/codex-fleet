@@ -1,8 +1,19 @@
 import type { DelegateTaskRequest, MergePolicy } from "@codex-fleet/shared";
 
+export type WorkerActivityTelemetry = {
+  eventType?: string;
+  toolName?: string;
+  callId?: string;
+  commandPreview?: string;
+  durationMs?: number;
+  exitCode?: number;
+  important?: boolean;
+};
+
 export type WorkerActivity = {
   kind: "heartbeat" | "codex_event";
   detail?: string;
+  telemetry?: WorkerActivityTelemetry;
 };
 
 export type WorkerInput = {

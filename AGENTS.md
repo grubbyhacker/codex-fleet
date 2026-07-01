@@ -9,6 +9,8 @@
 - Keep `docs/` as the home for design documents, DCRs, and future operational docs.
 - Keep `agent-handoff.md` concise and high-level. If it exceeds 500 lines, compact old entries automatically before appending new ones.
 - Repo-mutating tasks should not end as loose local edits. After implementing and validating, agents should have committed changes on a feature branch, pushed it, opened a normal ready-for-review PR, and reported validation results plus clean task worktree state.
+- A ready-for-review PR is the default handoff point. Agents should release their turn there unless the operator explicitly asks for merge, deploy, or post-merge cleanup.
+- Do not wait indefinitely on GitHub checks, deploys, or external workflows. For PR handoff, report one concrete check snapshot and stop; if merge/deploy is explicitly requested, use bounded waits and report only material status changes.
 - Do not leave validated repo changes only in the local worktree as the final state of a task.
 - Never open draft PRs unless the operator explicitly requests draft mode.
 - Code review is the human gate: agents must not self-merge unless explicitly directed to do so.

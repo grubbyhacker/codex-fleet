@@ -119,7 +119,7 @@ case "$delivery_mode" in
     guidance='This pr_for_review task must not stop with a dirty worktree. Do not discard intended changes. Stage and commit intended work, push the branch, open or report the PR URL, then stop with a clean worktree. If blocked, report git status --short and the exact blocker.'
     ;;
   full_delivery)
-    guidance='This full_delivery task must not stop with a dirty worktree. Do not discard intended changes. Reconcile the source-of-truth repo state, commit/push/merge or report exactly what remains, verify remote state, then stop with a clean worktree. If blocked, report git status --short and the exact blocker.'
+    guidance='This full_delivery task must not stop with a dirty worktree. Do not discard intended changes. Reconcile the source-of-truth repo state, commit and push intended changes, open/update the PR or merge only when explicitly authorized, then stop with a clean worktree. If blocked, report git status --short and the exact blocker.'
     ;;
   push_to_main)
     guidance='This push_to_main task must not stop with a dirty worktree. Do not discard intended changes. Stage and commit intended work, push to the default branch or report the exact blocker, then stop with a clean worktree. If blocked, report git status --short and the exact blocker.'

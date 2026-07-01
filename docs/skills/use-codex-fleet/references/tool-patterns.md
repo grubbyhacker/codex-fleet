@@ -117,6 +117,8 @@ If checks are pending at handoff, do not resume the repo worker just to poll. Ei
 
 Only ask a worker to wait on external checks when the worker needs the result to perform an explicitly requested delivery step, such as merging after green checks in a repo whose merge policy allows it. In that case, let the worker wait quietly and keep using `wait_tasks` without narrating repeated observations.
 
+Use precise handoff language in worker prompts. "Open a ready PR and stop" means the worker should release its turn after the PR URL and one check snapshot. "Merge/deploy after green checks" is a separate instruction and should be used only when the user actually wants that full delivery.
+
 ## Completion Semantics
 
 Fleet knows hard operational facts:

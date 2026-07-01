@@ -9,6 +9,7 @@ import { z } from "zod";
 import {
   WorkerRunError,
   type WorkerBackend,
+  type WorkerActivityTelemetry,
   type WorkerInput,
   type WorkerResult
 } from "./backend.js";
@@ -43,6 +44,7 @@ export class CodexWorkerBackend implements WorkerBackend {
     });
     const client = new Client({ name: `codex-fleet-worker-${input.taskId}`, version: "0.0.0" });
     const stderrCapture = captureTextStream(transport.stderr);
+    const telemetry = new CodexEventTelemetry();
     const heartbeat = setInterval(
       () => {
         input.onActivity?.({ kind: "heartbeat" });
@@ -53,7 +55,12 @@ export class CodexWorkerBackend implements WorkerBackend {
 
     try {
       client.setNotificationHandler(CodexEventNotificationSchema, (notification) => {
-        input.onActivity?.({ kind: "codex_event", detail: codexEventDetail(notification) });
+        const activity = telemetry.activity(notification);
+        input.onActivity?.({
+          kind: "codex_event",
+          detail: activity.eventType,
+          telemetry: activity
+        });
       });
       await client.connect(transport, { timeout: 30_000 });
       input.onActivity?.({ kind: "heartbeat", detail: "connected" });
@@ -377,6 +384,126 @@ export function captureTextStream(
 function codexEventDetail(notification: z.infer<typeof CodexEventNotificationSchema>): string {
   const params = notification.params as { msg?: { type?: unknown } } | undefined;
   return typeof params?.msg?.type === "string" ? params.msg.type : "event";
+}
+
+export class CodexEventTelemetry {
+  private readonly active = new Map<string, { startedAt: number; eventType: string }>();
+  private lastAnonymousStart: { startedAt: number; eventType: string } | undefined;
+
+  activity(notification: z.infer<typeof CodexEventNotificationSchema>): WorkerActivityTelemetry {
+    const message = codexEventMessage(notification);
+    const eventType = codexEventDetail(notification);
+    const callId = stringField(message, ["call_id", "callId", "id", "item_id", "itemId"]);
+    const commandPreview = commandPreviewFrom(message);
+    const toolName = toolNameFrom(message, eventType);
+    const activity: WorkerActivityTelemetry = {
+      eventType,
+      toolName,
+      callId,
+      commandPreview,
+      important: isToolBoundaryEvent(eventType)
+    };
+
+    const now = Date.now();
+    if (isToolStartEvent(eventType)) {
+      if (callId) {
+        this.active.set(callId, { startedAt: now, eventType });
+      } else {
+        this.lastAnonymousStart = { startedAt: now, eventType };
+      }
+    }
+    if (isToolEndEvent(eventType)) {
+      const started = callId ? this.active.get(callId) : this.lastAnonymousStart;
+      if (started) {
+        activity.durationMs = Math.max(0, now - started.startedAt);
+        if (callId) {
+          this.active.delete(callId);
+        } else {
+          this.lastAnonymousStart = undefined;
+        }
+      }
+      const exitCode = numberField(message, ["exit_code", "exitCode", "status"]);
+      if (exitCode !== undefined) {
+        activity.exitCode = exitCode;
+      }
+    }
+
+    return stripUndefined(activity);
+  }
+}
+
+function codexEventMessage(
+  notification: z.infer<typeof CodexEventNotificationSchema>
+): Record<string, unknown> | undefined {
+  const params = notification.params as { msg?: unknown } | undefined;
+  return isRecord(params?.msg) ? params.msg : undefined;
+}
+
+function isToolBoundaryEvent(eventType: string | undefined): boolean {
+  return isToolStartEvent(eventType) || isToolEndEvent(eventType);
+}
+
+function isToolStartEvent(eventType: string | undefined): boolean {
+  return Boolean(eventType && /(?:^|_)(begin|started|start)$/i.test(eventType));
+}
+
+function isToolEndEvent(eventType: string | undefined): boolean {
+  return Boolean(eventType && /(?:^|_)(end|completed|complete|failed|errored)$/i.test(eventType));
+}
+
+function commandPreviewFrom(value: unknown): string | undefined {
+  const raw = firstFieldDeep(value, ["command", "cmd", "argv", "args"]);
+  if (Array.isArray(raw)) {
+    return preview(redactSensitive(raw.map((item) => String(item)).join(" ")), 240);
+  }
+  if (typeof raw === "string") {
+    return preview(redactSensitive(raw), 240);
+  }
+  return undefined;
+}
+
+function toolNameFrom(value: unknown, fallback: string | undefined): string | undefined {
+  const raw = firstFieldDeep(value, ["tool", "tool_name", "toolName", "name"]);
+  return typeof raw === "string" ? preview(raw, 80) : fallback;
+}
+
+function stringField(value: unknown, fields: string[]): string | undefined {
+  const found = firstFieldDeep(value, fields);
+  return typeof found === "string" ? preview(found, 120) : undefined;
+}
+
+function numberField(value: unknown, fields: string[]): number | undefined {
+  const found = firstFieldDeep(value, fields);
+  return typeof found === "number" && Number.isFinite(found) ? found : undefined;
+}
+
+function firstFieldDeep(value: unknown, fields: string[], depth = 0): unknown {
+  if (!isRecord(value) || depth > 4) {
+    return undefined;
+  }
+  for (const field of fields) {
+    if (field in value) {
+      return value[field];
+    }
+  }
+  for (const nested of Object.values(value)) {
+    const found = firstFieldDeep(nested, fields, depth + 1);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function redactSensitive(value: string): string {
+  return value
+    .replace(/(token|secret|password|passwd|api[_-]?key)=\S+/gi, "$1=<redacted>")
+    .replace(/(Authorization:\s*Bearer\s+)\S+/gi, "$1<redacted>")
+    .replace(/(github_pat_|ghp_|sk-)[A-Za-z0-9_-]+/g, "$1<redacted>");
 }
 
 function isTimeoutError(error: unknown): boolean {

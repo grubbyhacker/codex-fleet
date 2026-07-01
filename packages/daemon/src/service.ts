@@ -305,14 +305,15 @@ export class FleetService {
       ...workerInput,
       onActivity: (activity: Parameters<NonNullable<typeof workerInput.onActivity>>[0]) => {
         const nowMs = Date.now();
-        if (nowMs - lastActivityEventAt < 10_000) {
+        if (!activity.telemetry?.important && nowMs - lastActivityEventAt < 10_000) {
           return;
         }
         lastActivityEventAt = nowMs;
         this.append("task_activity", workerInput.taskId, {
           lastActivityAt: new Date(nowMs).toISOString(),
           kind: activity.kind,
-          detail: activity.detail
+          detail: activity.detail,
+          telemetry: activity.telemetry
         } satisfies TaskActivityPayload);
       }
     });
@@ -730,7 +731,7 @@ function mergePolicyRepairInstruction(mergePolicy: WorkerRunInput["mergePolicy"]
     case "human_review":
       return "Repo merge policy: human_review. Do not merge your own PR or push directly to the default branch. Open or update a ready PR, take one CI/check snapshot, report the PR URL and check results, then stop.";
     case "agent_merge_explicit":
-      return "Repo merge policy: agent_merge_explicit. Do not merge unless the current prompt explicitly instructs you to merge this PR. Otherwise stop after a ready PR and one CI/check snapshot.";
+      return "Repo merge policy: agent_merge_explicit. Do not merge or wait for merge readiness unless the current prompt explicitly instructs you to merge this PR. Otherwise stop after a ready PR and one CI/check snapshot.";
     case "agent_merge_allowed":
       return "Repo merge policy: agent_merge_allowed. You may merge when the delivery mode, prompt, repository rules, and checks all allow it.";
     default:
@@ -750,7 +751,7 @@ function deliveryModeRepairInstruction(
         return "For full_delivery under human_review, stage and commit intended changes, push the branch, open or update a ready PR, take one CI/check snapshot, report the PR URL and checks, and stop before merge.";
       }
       if (mergePolicy === "agent_merge_explicit") {
-        return "For full_delivery under agent_merge_explicit, stage and commit intended changes, push/open/update the PR, and merge only if the current task prompt explicitly instructs this PR to be merged.";
+        return "For full_delivery under agent_merge_explicit, stage and commit intended changes, push/open/update the PR, take one check snapshot, then stop unless the current task prompt explicitly instructs this PR to be merged.";
       }
       return "For full_delivery, stage and commit intended changes, push/open/merge as required by the repo and prompt, verify remote state, and stop with a clean worktree.";
     case "push_to_main":
