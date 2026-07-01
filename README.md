@@ -70,8 +70,7 @@ Known rough edges:
 ```sh
 mise install
 mise exec -- bun install
-mise exec -- bun run build:bin
-mise exec -- bun run install:bin
+mise exec -- bun run deploy:local
 ```
 
 Installed binaries are copied to `~/.local/bin`:
@@ -119,11 +118,28 @@ codex-fleet service launch-agent load
 codex-fleet service launch-agent status
 ```
 
-After binary updates:
+After binary updates, use the same deterministic local deploy path:
+
+```sh
+mise exec -- bun run deploy:local
+```
+
+That command checks Fleet task state, builds and installs binaries, installs the
+Fleet skill, restarts only the LaunchAgent daemon, and leaves client-owned MCP
+adapter processes alone.
+
+If you only need to restart the already-installed daemon:
 
 ```sh
 codex-fleet service launch-agent restart
 ```
+
+Do not kill or restart `codex-fleet-mcp` processes during a binary redeploy. The
+MCP adapter is a stdio child owned by the MCP client; killing it closes the
+client's active transport. Existing clients keep using the adapter process they
+already launched until the client reconnects. If the updated adapter binary must
+be used immediately, restart or reconnect the MCP client after the daemon is
+healthy.
 
 ## Connect MCP
 

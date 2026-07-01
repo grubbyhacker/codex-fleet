@@ -53,8 +53,9 @@ Use the official `codex-fleet` MCP tools by default. Do not use `codex-fleet-poc
    - Use CLI/TUI `wipe-clean` only as an operator cleanup action for terminal Fleet-owned resources. It intentionally discards dirty/ahead worktrees and skips live tasks.
 
 8. Do not interrupt live workers casually:
-   - Never restart the daemon, unload the LaunchAgent, or run broad cleanup while `list_tasks` shows `queued`, `running`, or fresh `stale` tasks unless the user explicitly approves the interruption.
-   - Leave standing infrastructure such as `codex-fleet-daemon`, `codex-fleet-mcp`, and `codex-fleet-tui` alone unless the task is specifically about operating Fleet itself.
+   - Ordinary orchestrators should not administer Fleet infrastructure. Do not restart the daemon, unload the LaunchAgent, kill adapter processes, or run broad cleanup as part of normal delegated work.
+   - If the Fleet MCP transport is closed, do not treat that as a repo-work blocker. Continue with direct repo reads or other non-Fleet tools when that is safe, and tell the operator that the MCP client needs to reconnect if Fleet delegation is required.
+   - Only when the user explicitly asks you to administer Codex Fleet itself should you operate Fleet services. For local binary deploys from the `codex-fleet` repo, use `mise exec -- bun run deploy:local`; do not invent process-management steps.
 
 ## Delegation Choices
 

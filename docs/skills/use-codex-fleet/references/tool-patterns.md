@@ -162,12 +162,25 @@ codex-fleet cleanup wipe-clean
 
 `wipe-clean` removes terminal Fleet-owned repo worktrees, including dirty or ahead-of-base worktrees, and force-deletes Fleet branches when present. It skips live tasks. Use it only when the user wants the local action queue cleaned.
 
-## Service Safety
+## Fleet Admin Service Safety
+
+This section is for explicit Codex Fleet administration tasks. Ordinary
+orchestrators should not manage Fleet processes; if the MCP transport is closed,
+continue with safe non-Fleet work when possible and ask the operator to reconnect
+the MCP client when Fleet delegation is needed.
 
 Before restarting or changing Fleet services:
 
 1. Call `list_tasks({ "states": ["queued", "running", "stale"], "limit": 50 })`.
 2. If any task is active, report the task ids and ask before interrupting.
-3. Restart the daemon or LaunchAgent only after the live queue is empty or the user approves interruption.
+3. For local binary deploys from the `codex-fleet` repo, run `mise exec -- bun run deploy:local`.
+4. Restart the daemon or LaunchAgent directly only after the live queue is empty or the user approves interruption.
 
 Standing processes such as `codex-fleet-daemon`, `codex-fleet-mcp`, and `codex-fleet-tui` are normal local infrastructure. Do not kill them as task cleanup.
+
+`codex-fleet-mcp` is different from the daemon: it is a stdio adapter launched
+and owned by the MCP client. Killing adapter processes closes active
+orchestrator transports. `deploy:local` intentionally leaves existing
+`codex-fleet-mcp` processes alone. Existing clients will keep their current
+adapter until they reconnect; if the updated adapter must be loaded immediately,
+ask the operator to restart or reconnect the MCP client.
