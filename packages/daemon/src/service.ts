@@ -728,13 +728,13 @@ function deliveryRepairPrompt(
 function mergePolicyRepairInstruction(mergePolicy: WorkerRunInput["mergePolicy"]): string {
   switch (mergePolicy) {
     case "human_review":
-      return "Repo merge policy: human_review. Do not merge your own PR or push directly to the default branch. Open or update a ready PR, wait for CI/check status when available, report the PR URL and check results, then stop.";
+      return "Repo merge policy: human_review. Do not merge your own PR or push directly to the default branch. Open or update a ready PR, take one CI/check snapshot, report the PR URL and check results, then stop.";
     case "agent_merge_explicit":
-      return "Repo merge policy: agent_merge_explicit. Do not merge unless the current prompt explicitly instructs you to merge this PR. Otherwise stop after a ready PR and check status.";
+      return "Repo merge policy: agent_merge_explicit. Do not merge unless the current prompt explicitly instructs you to merge this PR. Otherwise stop after a ready PR and one CI/check snapshot.";
     case "agent_merge_allowed":
       return "Repo merge policy: agent_merge_allowed. You may merge when the delivery mode, prompt, repository rules, and checks all allow it.";
     default:
-      return "Repo merge policy: unspecified. Do not assume merge authority; prefer stopping after a ready PR and check status unless the prompt explicitly says to merge.";
+      return "Repo merge policy: unspecified. Do not assume merge authority; prefer stopping after a ready PR and one CI/check snapshot unless the prompt explicitly says to merge.";
   }
 }
 
@@ -747,7 +747,7 @@ function deliveryModeRepairInstruction(
       return "For pr_for_review, stage and commit intended changes, push the branch, open or report the ready PR URL, and stop with a clean worktree.";
     case "full_delivery":
       if (mergePolicy === "human_review") {
-        return "For full_delivery under human_review, stage and commit intended changes, push the branch, open or update a ready PR, wait for CI/check status when practical, report the PR URL and checks, and stop before merge.";
+        return "For full_delivery under human_review, stage and commit intended changes, push the branch, open or update a ready PR, take one CI/check snapshot, report the PR URL and checks, and stop before merge.";
       }
       if (mergePolicy === "agent_merge_explicit") {
         return "For full_delivery under agent_merge_explicit, stage and commit intended changes, push/open/update the PR, and merge only if the current task prompt explicitly instructs this PR to be merged.";

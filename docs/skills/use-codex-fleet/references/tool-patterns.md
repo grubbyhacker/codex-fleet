@@ -96,11 +96,26 @@ Pseudo-flow:
 4. Note `suggestedNextWaitSeconds`; use it as a pacing hint, but prefer 30-45s waits for ordinary running workers.
 5. Save the maximum returned `event.seq`; pass it as `sinceEventSeq` on the next wait.
 6. If a snapshot is terminal or stale, call `get_task`.
-7. If still running, continue waiting. Briefly update the user only when there are useful new events, task observations, terminal/stale transitions, or meaningful elapsed time.
+7. If still running, continue waiting. Briefly update the user only when there are useful new events, first/occasional task observations, terminal/stale transitions, or meaningful elapsed time.
 
 `wait_tasks` returns immediately when new events exist or when a snapshot already matches `returnOnStatuses`. Otherwise it sleeps up to `maxWaitSeconds` capped at 45 seconds.
 
-When a running worker emits no detail during a wait slice, `wait_tasks` can return a `task_observation` event with the current state, `lastActivityAt`, and quiet duration. Surface those facts. Do not call `get_task` repeatedly or shorten waits only because a worker has not emitted detailed progress. Fleet will mark quiet workers `stale` when the daemon's stale threshold is reached.
+When a running worker emits no detail during a wait slice, `wait_tasks` can return a `task_observation` event with the current state, `lastActivityAt`, and quiet duration. Use those facts to keep your own confidence in the task state, and surface them sparingly rather than narrating every quiet wait. Do not call `get_task` repeatedly or shorten waits only because a worker has not emitted detailed progress. Fleet will mark quiet workers `stale` when the daemon's stale threshold is reached.
+
+## External Checks And CI
+
+Avoid nested passive waiting. A repo worker should not spend a long turn polling GitHub Actions or CI while the orchestrator polls the worker and narrates each poll.
+
+For PR-producing repo tasks, the normal worker handoff is:
+
+1. implement and validate locally;
+2. commit, push, and open/update the PR;
+3. take one external check snapshot, such as current GitHub checks or workflow run ids;
+4. exit with the PR URL, check snapshot, local validation, and any pending/failing checks.
+
+If checks are pending at handoff, do not resume the repo worker just to poll. Either report the pending PR/check state and stop, or, when the user asked for completion after checks, wait directly on the external system with a purpose-built tool or CLI. User-facing updates should happen on material status changes or final outcome, not every polling interval.
+
+Only ask a worker to wait on external checks when the worker needs the result to perform an explicitly requested delivery step, such as merging after green checks in a repo whose merge policy allows it. In that case, let the worker wait quietly and keep using `wait_tasks` without narrating repeated observations.
 
 ## Completion Semantics
 

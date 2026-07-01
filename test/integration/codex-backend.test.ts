@@ -192,6 +192,9 @@ describe("codex worker backend", () => {
     expect(args["developer-instructions"]).toContain(
       "Do not leave intended review changes only as untracked or uncommitted files"
     );
+    expect(args["developer-instructions"]).toContain("External check waiting guardrail");
+    expect(args["developer-instructions"]).toContain("take one check snapshot");
+    expect(args["developer-instructions"]).not.toContain("wait for CI/check status");
   });
 
   it("turns full delivery into PR handoff for human-review repos", () => {
@@ -214,8 +217,10 @@ describe("codex worker backend", () => {
     expect(args["developer-instructions"]).toContain("Repo merge policy human_review");
     expect(args["developer-instructions"]).toContain("do not merge your own PR");
     expect(args["developer-instructions"]).toContain("stop after pushing the branch");
+    expect(args["developer-instructions"]).toContain("take one CI/check snapshot");
     expect(args["developer-instructions"]).toContain("stop before merge");
     expect(args["developer-instructions"]).not.toContain("carry through merge");
+    expect(args["developer-instructions"]).not.toContain("wait for CI/check status");
   });
 
   it("allows merge only with explicit prompt authority for explicit-merge repos", () => {
@@ -239,7 +244,9 @@ describe("codex worker backend", () => {
     expect(args["developer-instructions"]).toContain(
       "Merge only if this task prompt explicitly instructs"
     );
+    expect(args["developer-instructions"]).toContain("report PR URL/check snapshot");
     expect(args["developer-instructions"]).toContain("stop before merge");
+    expect(args["developer-instructions"]).not.toContain("wait for CI/check status");
   });
 
   it("warns workers to avoid whole-file rewrites for large artifacts", () => {

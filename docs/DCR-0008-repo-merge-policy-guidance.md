@@ -24,5 +24,11 @@ Fleet exposes the policy in target descriptors and injects it into worker instru
 ## Consequences
 
 - Protected repos default to human review without changing public task tools.
-- Orchestrators can still request `full_delivery`, but workers in human-review repos stop at a ready PR plus check status.
+- Orchestrators can still request `full_delivery`, but workers in human-review repos stop at a ready PR plus one check snapshot.
 - True prevention of merges still requires credential separation or broker-enforced GitHub permissions.
+
+## Clarification: External Check Waiting
+
+Date: 2026-07-01
+
+Check status means a bounded snapshot, not indefinite passive polling. For review handoff, workers report pending/running/failing/passing checks and relevant URLs or run ids, then exit. Longer waits for CI, GitHub Actions, deploys, or other external systems belong to the orchestrator or to a worker only when the task explicitly requires a post-check delivery step such as merge.
