@@ -195,6 +195,7 @@ function workerInstructions(input: WorkerInput): string {
     workspace,
     largeArtifactInstructions(),
     "shell" in input.request.target ? boundedShellDiagnosticsInstructions() : undefined,
+    "repo" in input.request.target ? externalCheckWaitingInstructions() : undefined,
     "repo" in input.request.target ? mergePolicyInstructions(input) : undefined,
     deliveryModeInstructions(input),
     "Keep responses concise and report concrete paths and commands."
@@ -219,16 +220,24 @@ function boundedShellDiagnosticsInstructions(): string {
   ].join(" ");
 }
 
+function externalCheckWaitingInstructions(): string {
+  return [
+    "External check waiting guardrail: after pushing a branch or opening/updating a PR, do not sit in a long polling loop waiting for GitHub Actions, CI, or other external checks unless the task explicitly requires you to wait for completion so you can merge or perform another requested delivery step.",
+    "For review handoff, take one check snapshot, report pending/running/failing/passing checks with URLs or run ids when available, and exit.",
+    "When explicit delivery authority requires waiting, keep the waiting inside this worker bounded and quiet: poll at a reasonable interval, continue only on material status changes or timeout, and report the final check outcome."
+  ].join(" ");
+}
+
 function mergePolicyInstructions(input: WorkerInput): string {
   switch (input.mergePolicy) {
     case "human_review":
-      return "Repo merge policy human_review: do not merge your own PR, do not approve your own PR, and do not push directly to the default branch. For delivery modes that would otherwise merge, stop after pushing the branch, opening/updating a ready PR, and reporting CI/check status.";
+      return "Repo merge policy human_review: do not merge your own PR, do not approve your own PR, and do not push directly to the default branch. For delivery modes that would otherwise merge, stop after pushing the branch, opening/updating a ready PR, and reporting a CI/check snapshot.";
     case "agent_merge_explicit":
-      return "Repo merge policy agent_merge_explicit: do not merge unless this task prompt explicitly instructs you to merge this PR. If merge is not explicit, stop after a ready PR and CI/check status.";
+      return "Repo merge policy agent_merge_explicit: do not merge unless this task prompt explicitly instructs you to merge this PR. If merge is not explicit, stop after a ready PR and CI/check snapshot.";
     case "agent_merge_allowed":
       return "Repo merge policy agent_merge_allowed: you may merge when the delivery mode, task prompt, repository rules, and checks all allow it.";
     default:
-      return "Repo merge policy unspecified: do not assume merge authority. Prefer stopping after a ready PR and CI/check status unless the prompt explicitly says to merge.";
+      return "Repo merge policy unspecified: do not assume merge authority. Prefer stopping after a ready PR and CI/check snapshot unless the prompt explicitly says to merge.";
   }
 }
 
@@ -239,7 +248,7 @@ function deliveryModeInstructions(input: WorkerInput): string {
   if (input.mergePolicy === "human_review") {
     switch (input.request.deliveryMode) {
       case "full_delivery":
-        return "Delivery mode full_delivery under human_review: implement, verify, commit, push, open or update a ready PR, wait for CI/check status when practical, report the PR URL and checks, then stop before merge.";
+        return "Delivery mode full_delivery under human_review: implement, verify, commit, push, open or update a ready PR, take one CI/check snapshot, report the PR URL and checks, then stop before merge.";
       case "push_to_main":
         return "Delivery mode push_to_main conflicts with repo merge policy human_review. Do not push directly to the default branch; report that this repo requires a PR for human review.";
     }
@@ -248,7 +257,7 @@ function deliveryModeInstructions(input: WorkerInput): string {
     input.mergePolicy === "agent_merge_explicit" &&
     input.request.deliveryMode === "full_delivery"
   ) {
-    return "Delivery mode full_delivery under agent_merge_explicit: implement, verify, commit, push, and open or update a ready PR. Merge only if this task prompt explicitly instructs you to merge this PR; otherwise report PR URL/checks and stop before merge.";
+    return "Delivery mode full_delivery under agent_merge_explicit: implement, verify, commit, push, and open or update a ready PR. Merge only if this task prompt explicitly instructs you to merge this PR; otherwise report PR URL/check snapshot and stop before merge.";
   }
   switch (input.request.deliveryMode) {
     case "research_only":
