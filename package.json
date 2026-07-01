@@ -22,6 +22,7 @@
     "build": "bun run build:bin",
     "audit:deps": "bun audit",
     "check": "bun run typecheck && bun run lint && bun run format:check && bun run test:all",
+    "deploy:local": "bun run scripts/deploy-local.ts",
     "format": "prettier --write .",
     "format:write": "bun run format",
     "format:check": "prettier --check .",
