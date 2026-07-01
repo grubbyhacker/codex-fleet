@@ -18,6 +18,7 @@ import {
   type ModelTier,
   type OwnerSession,
   type RpcEnvelope,
+  type TaskState,
   type TaskSnapshot,
   type TargetDescriptor
 } from "@codex-fleet/shared";
@@ -487,6 +488,11 @@ export class FleetService {
       this.refreshStaleTasks();
       snapshots = request.taskIds.map((taskId) => this.requireTask(clientId, taskId, client));
       events = this.state.eventsSince(request.sinceEventSeq, request.taskIds);
+      if (events.length === 0) {
+        events = snapshots
+          .filter((task) => task.state === "running" || task.state === "stale")
+          .map((task) => this.append("task_observation", task.id, quietObservation(task)));
+      }
     }
     return {
       snapshots,
@@ -573,6 +579,35 @@ function compactTaskSnapshot(task: TaskSnapshot): TaskSnapshot {
   void workerStderr;
   void workerStderrPreview;
   return compact;
+}
+
+function quietObservation(task: TaskSnapshot): {
+  state: TaskState;
+  lastActivityAt?: string;
+  quietForSeconds?: number;
+  checkedAt: string;
+  message: string;
+} {
+  const checkedAt = new Date().toISOString();
+  const lastActivityAt = task.lastActivityAt ?? task.updatedAt;
+  const lastActivityMs = Date.parse(lastActivityAt);
+  const checkedMs = Date.parse(checkedAt);
+  const quietForSeconds =
+    Number.isFinite(lastActivityMs) && Number.isFinite(checkedMs)
+      ? Math.max(0, Math.floor((checkedMs - lastActivityMs) / 1000))
+      : undefined;
+  const quietPhrase =
+    quietForSeconds === undefined
+      ? "with no new worker events in this wait window"
+      : `with no new worker events for ${quietForSeconds} second(s)`;
+
+  return {
+    state: task.state,
+    lastActivityAt,
+    quietForSeconds,
+    checkedAt,
+    message: `Fleet observed task ${task.state} ${quietPhrase}; last worker activity remains ${lastActivityAt}.`
+  };
 }
 
 function targetMatches(task: TaskSnapshot, targetId: string): boolean {

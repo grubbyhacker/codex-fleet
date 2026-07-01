@@ -96,11 +96,11 @@ Pseudo-flow:
 4. Note `suggestedNextWaitSeconds`; use it as a pacing hint, but prefer 30-45s waits for ordinary running workers.
 5. Save the maximum returned `event.seq`; pass it as `sinceEventSeq` on the next wait.
 6. If a snapshot is terminal or stale, call `get_task`.
-7. If still running, continue waiting. Briefly update the user only when there are useful new events, terminal/stale transitions, or meaningful elapsed time.
+7. If still running, continue waiting. Briefly update the user only when there are useful new events, task observations, terminal/stale transitions, or meaningful elapsed time.
 
 `wait_tasks` returns immediately when new events exist or when a snapshot already matches `returnOnStatuses`. Otherwise it sleeps up to `maxWaitSeconds` capped at 45 seconds.
 
-Quiet workers are normal. Do not call `get_task` repeatedly or shorten waits only because a worker has not emitted detailed progress. Fleet will mark quiet workers `stale` when the daemon's stale threshold is reached.
+When a running worker emits no detail during a wait slice, `wait_tasks` can return a `task_observation` event with the current state, `lastActivityAt`, and quiet duration. Surface those facts. Do not call `get_task` repeatedly or shorten waits only because a worker has not emitted detailed progress. Fleet will mark quiet workers `stale` when the daemon's stale threshold is reached.
 
 ## Completion Semantics
 

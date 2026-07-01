@@ -101,7 +101,7 @@ MCP Tool / CLI / TUI -> callDaemon -> TCP/Unix socket -> rpc/server.ts -> servic
   - `readAll()` hydrates all events on startup.
 - In-memory projection: [packages/daemon/src/store/state.ts](../packages/daemon/src/store/state.ts)
   - Replays events via `FleetState.replay`.
-  - Handles `task_created`, `task_resumed`, `task_state`, `task_resource`, `task_activity`.
+  - Handles `task_created`, `task_resumed`, `task_state`, `task_resource`, `task_activity`; observation-only events are retained in history without changing task state.
 
 ### 5.2 Task fields and state lifecycle
 
@@ -111,7 +111,7 @@ MCP Tool / CLI / TUI -> callDaemon -> TCP/Unix socket -> rpc/server.ts -> servic
   - `delegateTask` emits `task_created`, optional `model_routing`, optional `task_resource`, initial `task_state` (`running`)
   - `runWorker` emits `task_state` on exit/failure/timeout
   - `refreshStaleTasks` upgrades stale `running` tasks
-  - `waitTasks` returns snapshots + event deltas + suggested backoff.
+  - `waitTasks` returns snapshots + event deltas + suggested backoff, and emits `task_observation` when an active task stays quiet for a wait slice.
 
 ### 5.3 Staleness and wait semantics
 
@@ -221,7 +221,7 @@ MCP Tool / CLI / TUI -> callDaemon -> TCP/Unix socket -> rpc/server.ts -> servic
 
 ### 10.2 What gets logged
 
-- `task_created`, `task_resumed`, `task_resource`, `task_activity`, `task_state`, `worktree_status`.
+- `task_created`, `task_resumed`, `task_resource`, `task_activity`, `task_observation`, `task_state`, `worktree_status`.
 - Error paths include `WorkerRunError` state and previews via summary payloads.
 
 ### 10.3 Surface in UI

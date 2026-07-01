@@ -25,13 +25,14 @@ Use the official `codex-fleet` MCP tools by default. Do not use `codex-fleet-poc
    - Use `wait_tasks` as the primary monitoring primitive.
    - For normal active workers, use `maxWaitSeconds` 30-45 and include terminal/stale `returnOnStatuses`.
    - Carry forward the highest event `seq` you have seen as `sinceEventSeq`.
-   - Quiet workers are normal. Do not call `get_task` just because a worker has not emitted detailed progress.
+   - Quiet workers can happen. Do not call `get_task` just because a worker has not emitted detailed progress, but do surface the concrete `wait_tasks` facts: returned events, current state, `lastActivityAt`, and quiet duration when present.
    - Use `get_task` after terminal, stale, failed, or unexpected states, or when you need full prompt/output/stderr/worktree details.
-   - Give user-facing updates on new useful events, terminal/stale transitions, or meaningful elapsed time; do not narrate every wait loop.
+   - Give user-facing updates on new useful events, terminal/stale transitions, task observations, or meaningful elapsed time; do not narrate every wait loop.
 
 4. Keep ownership of pending work:
    - If Fleet tasks are still running and you have no other immediate work, keep waiting with `wait_tasks`.
    - Do not return control to the user merely because workers are quiet.
+   - Do not describe a lack of detailed progress as "normal for Fleet" without also reporting observed task ids, states, and last activity/quiet timing.
    - Returning control is appropriate when all tasks are terminal, blocked, stale and needing a user choice, explicitly paused by the user, or impossible to continue without external input.
    - If you must return control with pending tasks, report the exact task ids, current states, and the next `wait_tasks` call to make.
 

@@ -56,7 +56,7 @@ export function createAdapterServer(options = loadAdapterOptions()): McpServer {
     options,
     "wait_tasks",
     waitTasksRequestSchema,
-    "Primary monitoring primitive for active workers. Prefer 30-45s maxWaitSeconds with terminal/stale returnOnStatuses, carry sinceEventSeq forward, and keep waiting instead of returning control while workers are merely quiet."
+    "Primary monitoring primitive for active workers. Prefer 30-45s maxWaitSeconds with terminal/stale returnOnStatuses, carry sinceEventSeq forward, and surface returned events or snapshot state/lastActivityAt facts instead of saying quiet work has no user-visible detail."
   );
   registerProxyTool(
     server,
