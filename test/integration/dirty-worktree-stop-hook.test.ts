@@ -138,9 +138,10 @@ describe("dirty worktree stop hook", () => {
       writeFileSync(join(repo, "dirty.txt"), "dirty\n");
       const scriptPath = ensureDirtyWorktreeStopHookScript(paths);
 
-      expect(runHook(scriptPath, repo, attemptsPath, "full_delivery")).toContain(
-        "Reconcile the source-of-truth repo state"
-      );
+      const fullDelivery = runHook(scriptPath, repo, attemptsPath, "full_delivery");
+      expect(fullDelivery).toContain("Reconcile the source-of-truth repo state");
+      expect(fullDelivery).toContain("merge only when explicitly authorized");
+      expect(fullDelivery).not.toContain("commit/push/merge");
       rmSync(attemptsPath, { force: true });
       expect(runHook(scriptPath, repo, attemptsPath, "push_to_main")).toContain(
         "push to the default branch"

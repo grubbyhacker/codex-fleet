@@ -109,6 +109,81 @@ describe("supervision and waiting", () => {
     }
   });
 
+  it("records important telemetry activity without throttle loss", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-telemetry-"));
+    const paths = resolveFleetPaths(root);
+    const client = createClient(paths, "orch", "orchestrator");
+    const backend: WorkerBackend = {
+      async run(input) {
+        input.onActivity?.({
+          kind: "codex_event",
+          detail: "exec_command_begin",
+          telemetry: {
+            eventType: "exec_command_begin",
+            commandPreview: "gh pr checks 1 --watch",
+            important: true
+          }
+        });
+        input.onActivity?.({
+          kind: "codex_event",
+          detail: "exec_command_end",
+          telemetry: {
+            eventType: "exec_command_end",
+            durationMs: 12,
+            exitCode: 0,
+            important: true
+          }
+        });
+        return {
+          exitCode: 0,
+          finalResponse: "done",
+          finalResponsePreview: "done",
+          codexThreadId: `fake-thread-${input.taskId}`
+        };
+      }
+    };
+    const daemon = await startDaemon(paths, backend);
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "telemetry"
+      })) as { taskId: string };
+      await waitForState(rpc, delegated.taskId, "exited");
+
+      const history = (await callDaemon(rpc, "get_task_history", {
+        taskId: delegated.taskId,
+        limit: 10
+      })) as { events: Array<{ type: string; summary: string }> };
+      const activities = history.events
+        .filter((event) => event.type === "task_activity")
+        .map((event) => JSON.parse(event.summary));
+
+      expect(activities).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            telemetry: expect.objectContaining({
+              eventType: "exec_command_begin",
+              commandPreview: "gh pr checks 1 --watch"
+            })
+          }),
+          expect.objectContaining({
+            telemetry: expect.objectContaining({
+              eventType: "exec_command_end",
+              durationMs: 12,
+              exitCode: 0
+            })
+          })
+        ])
+      );
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("returns an observation event when a running worker is quiet for a wait slice", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-quiet-observation-"));
     const paths = resolveFleetPaths(root);

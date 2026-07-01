@@ -6,6 +6,8 @@ import {
   taskSnapshotSchema
 } from "@codex-fleet/shared";
 
+import type { WorkerActivityTelemetry } from "../workers/backend.js";
+
 export type TaskCreatedPayload = Omit<DelegateTaskRequest, "prompt"> & {
   ownerSession: OwnerSession;
   createdAt: string;
@@ -43,6 +45,7 @@ export type TaskActivityPayload = {
   lastActivityAt: string;
   kind?: string;
   detail?: string;
+  telemetry?: WorkerActivityTelemetry;
 };
 
 export class FleetState {

@@ -176,6 +176,7 @@ MCP Tool / CLI / TUI -> callDaemon -> TCP/Unix socket -> rpc/server.ts -> servic
 
 - `runWorker` in [packages/daemon/src/service.ts](../packages/daemon/src/service.ts)
   - records periodic `task_activity` (`heartbeat` / `codex_event` events)
+  - preserves important Codex tool boundary telemetry despite normal activity throttling
   - appends terminal `task_state` with final response and codex thread id.
 - Activity and timeout behavior is tested in [test/integration/supervision.test.ts](../test/integration/supervision.test.ts).
 
@@ -251,6 +252,7 @@ MCP Tool / CLI / TUI -> callDaemon -> TCP/Unix socket -> rpc/server.ts -> servic
   - visible tasks, selected task detail, events pane
   - action queue derived from terminal tasks with retained worktrees.
 - Core render path: `loadDashboardData` + `renderDashboard` + `renderDashboardForOpenTui` in [packages/tui/src/index.ts](../packages/tui/src/index.ts).
+- Live refresh defaults to five seconds and caches selected-task detail/history while the selected compact row is unchanged.
 - Coverage: [test/integration/tui.test.ts](../test/integration/tui.test.ts).
 
 ## 12) Test strategy and confidence map

@@ -45,6 +45,7 @@ Use the official `codex-fleet` MCP tools by default. Do not use `codex-fleet-poc
    - For normal PR handoff, accept a worker's PR URL plus one concrete check snapshot; if checks are still pending, report that pending state and stop unless the user asked you to carry through completion.
    - If the user asked for completion after external checks, the orchestrator should wait directly on the external system with a purpose-built tool or CLI, update the user only on material status changes or final outcome, then resume the worker only if code changes, merge, cleanup, or failure triage is needed.
    - If a worker is already waiting on an external system as part of explicit delivery authority, let it work quietly through `wait_tasks`; do not narrate every poll or observation.
+   - Be explicit in prompts: "ready PR and stop" is different from "merge/deploy after green checks." Do not rely on vague phrases like "run until the PR is complete."
 
 7. Release completed work:
    - Call `end_task` when you are done using an exited/terminal task.
@@ -93,6 +94,8 @@ Give workers all operational boundaries up front:
 For repo tasks, tell workers to respect repo guidance files, keep unrelated working-tree changes alone, validate with the repo's documented commands, and report exact paths, branches, commits, PRs, and failing checks.
 
 For PR-producing repo tasks, tell workers not to wait indefinitely on external checks. The expected handoff is a ready PR plus one check snapshot with pending/running/failing/passing status and URLs or run ids when available. Only ask a worker to wait for checks when the prompt explicitly requires a merge or another post-check delivery step.
+
+When the goal is human review, tell the worker to release its turn after opening/updating the ready PR. Merging, deploy verification, and post-merge cleanup are separate explicit goals.
 
 ## Reference
 
