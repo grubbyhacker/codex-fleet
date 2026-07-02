@@ -51,8 +51,10 @@ Use the official `codex-fleet` MCP tools by default. Do not use `codex-fleet-poc
    - If a worker is already waiting on an external system as part of explicit delivery authority, let it work quietly through `wait_tasks`; do not narrate every poll or observation.
    - Be explicit in prompts: "ready PR and stop" is different from "merge/deploy after green checks." Do not rely on vague phrases like "run until the PR is complete."
 
-7. Release completed work:
-   - Call `end_task` when you are done using an exited/terminal task.
+7. Release Fleet-owned resources without becoming the janitor:
+   - Treat `end_task` as release of Fleet-owned task resources, not as post-merge repository hygiene.
+   - For normal PR handoff, inspect the terminal task, report the ready PR and one check snapshot, then call `end_task` only if you no longer need the task worktree for follow-up.
+   - Do not wait for the human to merge a PR just so you can clean up afterward. If the operator later says a PR was merged, do not run `git fetch`, fast-forward a checkout, delete local branches, push branch deletions, or launch a cleanup worker unless they explicitly ask.
    - If `end_task` reports cleanup conflict because a worktree is dirty, inspect `get_task` before removing anything.
    - Use CLI/TUI `wipe-clean` only as an operator cleanup action for terminal Fleet-owned resources. It intentionally discards dirty/ahead worktrees and skips live tasks.
 
@@ -100,7 +102,7 @@ For repo tasks, tell workers to respect repo guidance files, keep unrelated work
 
 For PR-producing repo tasks, tell workers not to wait indefinitely on external checks. The expected handoff is a ready PR plus one check snapshot with pending/running/failing/passing status and URLs or run ids when available. Only ask a worker to wait for checks when the prompt explicitly requires a merge or another post-check delivery step.
 
-When the goal is human review, tell the worker to release its turn after opening/updating the ready PR. Merging, deploy verification, and post-merge cleanup are separate explicit goals.
+When the goal is human review, tell the worker to release its turn after opening/updating the ready PR. Merging and deploy verification are separate explicit goals. Post-merge branch/worktree cleanup is maintenance work, not a normal orchestrator follow-up after the operator says the PR merged.
 
 ## Reference
 

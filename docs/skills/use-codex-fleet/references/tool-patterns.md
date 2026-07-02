@@ -155,7 +155,7 @@ Fleet does not know whether the user's goal is semantically done. The orchestrat
 
 ## Cleanup
 
-Use `end_task` when you are done with a terminal task:
+Use `end_task` to release Fleet-owned resources for a terminal task when you are done inspecting those resources. This is not post-merge repository hygiene, and it does not require updating the target repo's normal checkout.
 
 ```json
 {
@@ -164,9 +164,18 @@ Use `end_task` when you are done with a terminal task:
 }
 ```
 
+For normal PR handoff:
+
+1. Inspect the terminal task and capture the PR URL, branch, commit, validation, and one external check snapshot.
+2. Report those facts to the operator.
+3. Call `end_task` if you no longer need the Fleet-owned worktree for review follow-up.
+4. Stop. Do not wait for merge just to perform cleanup later.
+
+If the operator later says the PR was merged, treat that as informational unless they ask for another action. Do not run `git fetch`, fast-forward the default branch, delete local branches, push branch deletions, or delegate a cleanup worker merely because the PR merged. GitHub remote branch auto-deletion and Fleet maintenance/TTL cleanup handle routine hygiene.
+
 For shell tasks, `end_task` removes the shell scratch directory.
 
-For repo tasks, `end_task` removes clean Fleet-owned worktrees and prunes merged Fleet branches. It blocks if the worktree is dirty. When blocked:
+For repo tasks, `end_task` removes clean Fleet-owned worktrees and prunes eligible Fleet-owned branches. It blocks if the worktree is dirty. When blocked:
 
 1. Call `get_task`.
 2. Inspect the worktree path and final response.
