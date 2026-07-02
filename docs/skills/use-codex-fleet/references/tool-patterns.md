@@ -79,6 +79,16 @@ Repo merge policies:
 
 After `delegate_task` returns a `taskId`, wait in bounded loops with `wait_tasks`. Do not use the user as the wait primitive.
 
+Do not use shell sleeps or broad list polling as a substitute for `wait_tasks`.
+Anti-patterns:
+
+- `sleep 30`, then `list_tasks`
+- repeated `list_tasks` calls for one known task id
+- user-visible narration such as `Checking the task state now` before each poll
+
+Use `list_tasks` for initial context, cleanup safety checks, broad queue views,
+or recovering task ids. Once you have a task id, use `wait_tasks` to monitor it.
+
 Pseudo-flow:
 
 1. Set `sinceEventSeq` to unset for the first call.
@@ -96,7 +106,8 @@ Pseudo-flow:
 4. Note `suggestedNextWaitSeconds`; use it as a pacing hint, but prefer 30-45s waits for ordinary running workers.
 5. Save the maximum returned `event.seq`; pass it as `sinceEventSeq` on the next wait.
 6. If a snapshot is terminal or stale, call `get_task`.
-7. If still running, continue waiting. Briefly update the user only when there are useful new events, first/occasional task observations, terminal/stale transitions, or meaningful elapsed time.
+7. If the terminal state is surprising, such as `timed_out` after recent activity, call `get_task_history` before deciding whether to resume, inspect the worktree, or report a blocker.
+8. If still running, continue waiting. Briefly update the user only when there are useful new events, first/occasional task observations, terminal/stale transitions, or meaningful elapsed time.
 
 `wait_tasks` returns immediately when new events exist or when a snapshot already matches `returnOnStatuses`. Otherwise it sleeps up to `maxWaitSeconds` capped at 45 seconds.
 
@@ -108,9 +119,11 @@ User-visible status should summarize milestones, not mirror the worker's activit
 - `The worker moved from repo inspection into implementation.`
 - `Validation is green and the worker is pushing the branch.`
 - `The worker is quiet for about 35 seconds but still heartbeating; I will keep waiting.`
+- `The worker timed out after recent activity, so I am inspecting its final state and history before deciding next steps.`
 
 Too much detail:
 
+- `Checking the Hermes role fix state now.`
 - `It read the repo instructions, inventory, and group vars.`
 - `It read the service roles and host-maintenance roles.`
 - `It inspected the diff and applied a follow-up patch.`
@@ -179,25 +192,14 @@ codex-fleet cleanup wipe-clean
 
 `wipe-clean` removes terminal Fleet-owned repo worktrees, including dirty or ahead-of-base worktrees, and force-deletes Fleet branches when present. It skips live tasks. Use it only when the user wants the local action queue cleaned.
 
-## Fleet Admin Service Safety
+## Not For Fleet Administration
 
-This section is for explicit Codex Fleet administration tasks. Ordinary
-orchestrators should not manage Fleet processes; if the MCP transport is closed,
-continue with safe non-Fleet work when possible and ask the operator to reconnect
-the MCP client when Fleet delegation is needed.
+This skill is for orchestrators using Fleet to delegate and monitor worker
+tasks. It is not the operating manual for Codex Fleet itself. If the user asks
+you to develop, debug, deploy, or administer Fleet, work directly in the
+`codex-fleet` repo and its operational docs rather than applying these
+orchestrator patterns.
 
-Before restarting or changing Fleet services:
-
-1. Call `list_tasks({ "states": ["queued", "running", "stale"], "limit": 50 })`.
-2. If any task is active, report the task ids and ask before interrupting.
-3. For local binary deploys from the `codex-fleet` repo, run `mise exec -- bun run deploy:local`.
-4. Restart the daemon or LaunchAgent directly only after the live queue is empty or the user approves interruption.
-
-Standing processes such as `codex-fleet-daemon`, `codex-fleet-mcp`, and `codex-fleet-tui` are normal local infrastructure. Do not kill them as task cleanup.
-
-`codex-fleet-mcp` is different from the daemon: it is a stdio adapter launched
-and owned by the MCP client. Killing adapter processes closes active
-orchestrator transports. `deploy:local` intentionally leaves existing
-`codex-fleet-mcp` processes alone. Existing clients will keep their current
-adapter until they reconnect; if the updated adapter must be loaded immediately,
-ask the operator to restart or reconnect the MCP client.
+Ordinary orchestrators should not manage Fleet processes. If the MCP transport
+is closed, continue with safe non-Fleet work when possible and ask the operator
+to reconnect the MCP client when Fleet delegation is needed.

@@ -1,6 +1,6 @@
 ---
 name: use-codex-fleet
-description: "Use Codex Fleet to delegate work to local Codex worker agents through the official codex-fleet MCP server. Use when a task should be handed to repo or shell workers, when monitoring Fleet tasks without excessive polling, when choosing delivery modes or model tiers, when cleaning up Fleet-owned resources, or when deciding whether to use the CLI/TUI instead of MCP. Prefer this skill over the old codex-fleet-poc unless the user explicitly asks for the prototype."
+description: "Use Codex Fleet to delegate work to local Codex worker agents through the official codex-fleet MCP server. Use when you need Fleet to hand a task to repo or shell workers, monitor delegated worker tasks without excessive polling, choose delivery modes/model tiers, or release Fleet-owned resources after delegated work. Do not use for developing, debugging, deploying, or administering Codex Fleet itself; for that, work directly in the codex-fleet repo and its operational docs. Prefer this skill over the old codex-fleet-poc unless the user explicitly asks for the prototype."
 ---
 
 # Use Codex Fleet
@@ -23,13 +23,15 @@ Use the official `codex-fleet` MCP tools by default. Do not use `codex-fleet-poc
 
 3. Wait without churn:
    - Use `wait_tasks` as the primary monitoring primitive.
+   - Do not run shell sleeps such as `sleep 30` to wait for Fleet work. `wait_tasks` is the wait primitive.
+   - Do not poll a known task with repeated `list_tasks`; use `wait_tasks` for active monitoring and `get_task` after terminal/stale/unexpected states. `list_tasks` is for broad context checks, not per-task wait loops.
    - For normal active workers, use `maxWaitSeconds` 30-45 and include terminal/stale `returnOnStatuses`.
    - Carry forward the highest event `seq` you have seen as `sinceEventSeq`.
    - Quiet workers can happen. Do not call `get_task` just because a worker has not emitted detailed progress, but do surface the concrete `wait_tasks` facts: returned events, current state, `lastActivityAt`, and quiet duration when present.
    - Use `get_task` after terminal, stale, failed, or unexpected states, or when you need full prompt/output/stderr/worktree details.
    - Give user-facing updates on new useful events, terminal/stale transitions, first/occasional task observations, or meaningful elapsed time; do not narrate every wait loop or repeated quiet observations.
-   - Good status updates are decision-relevant milestones, for example: "Task `<id>` is running; I asked for a ready PR and no live deploys", "The worker moved from repo inspection into implementation", "Validation is green and the branch is being pushed", or "The worker is quiet for 35s but still running; I will keep waiting."
-   - Too much status is a narrated activity feed, for example: "It read the repo instructions", "It read the service roles", "It inspected the diff", "Still cooking", or "I am waiting for the PR URL" after each wait. If a message only says that the wait loop continues, usually omit it.
+   - Good status updates are decision-relevant milestones, for example: "Task `<id>` is running; I asked for a ready PR and no live deploys", "The worker moved from repo inspection into implementation", "Validation is green and the branch is being pushed", "The worker is quiet for 35s but still running; I will keep waiting", or "The worker timed out after recent activity, so I am inspecting its final state and history before deciding next steps."
+   - Too much status is a narrated activity feed, for example: "Checking state now", "It read the repo instructions", "It read the service roles", "It inspected the diff", "Still cooking", or "I am waiting for the PR URL" after each wait. If a message only says that the wait loop continues, usually omit it.
 
 4. Keep ownership of pending work:
    - If Fleet tasks are still running and you have no other immediate work, keep waiting with `wait_tasks`.
@@ -57,7 +59,7 @@ Use the official `codex-fleet` MCP tools by default. Do not use `codex-fleet-poc
 8. Do not interrupt live workers casually:
    - Ordinary orchestrators should not administer Fleet infrastructure. Do not restart the daemon, unload the LaunchAgent, kill adapter processes, or run broad cleanup as part of normal delegated work.
    - If the Fleet MCP transport is closed, do not treat that as a repo-work blocker. Continue with direct repo reads or other non-Fleet tools when that is safe, and tell the operator that the MCP client needs to reconnect if Fleet delegation is required.
-   - Only when the user explicitly asks you to administer Codex Fleet itself should you operate Fleet services. For local binary deploys from the `codex-fleet` repo, use `mise exec -- bun run deploy:local`; do not invent process-management steps.
+   - If the user asks you to develop, debug, deploy, or administer Codex Fleet itself, this skill is the wrong tool. Work directly in the `codex-fleet` repo and its operational docs instead of following orchestrator delegation guidance.
 
 ## Delegation Choices
 
