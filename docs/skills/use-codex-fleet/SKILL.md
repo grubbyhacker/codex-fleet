@@ -28,6 +28,8 @@ Use the official `codex-fleet` MCP tools by default. Do not use `codex-fleet-poc
    - Quiet workers can happen. Do not call `get_task` just because a worker has not emitted detailed progress, but do surface the concrete `wait_tasks` facts: returned events, current state, `lastActivityAt`, and quiet duration when present.
    - Use `get_task` after terminal, stale, failed, or unexpected states, or when you need full prompt/output/stderr/worktree details.
    - Give user-facing updates on new useful events, terminal/stale transitions, first/occasional task observations, or meaningful elapsed time; do not narrate every wait loop or repeated quiet observations.
+   - Good status updates are decision-relevant milestones, for example: "Task `<id>` is running; I asked for a ready PR and no live deploys", "The worker moved from repo inspection into implementation", "Validation is green and the branch is being pushed", or "The worker is quiet for 35s but still running; I will keep waiting."
+   - Too much status is a narrated activity feed, for example: "It read the repo instructions", "It read the service roles", "It inspected the diff", "Still cooking", or "I am waiting for the PR URL" after each wait. If a message only says that the wait loop continues, usually omit it.
 
 4. Keep ownership of pending work:
    - If Fleet tasks are still running and you have no other immediate work, keep waiting with `wait_tasks`.
