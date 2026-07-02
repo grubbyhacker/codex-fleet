@@ -102,6 +102,23 @@ Pseudo-flow:
 
 When a running worker emits no detail during a wait slice, `wait_tasks` can return a `task_observation` event with the current state, `lastActivityAt`, and quiet duration. Use those facts to keep your own confidence in the task state, and surface them sparingly rather than narrating every quiet wait. Do not call `get_task` repeatedly or shorten waits only because a worker has not emitted detailed progress. Fleet will mark quiet workers `stale` when the daemon's stale threshold is reached.
 
+User-visible status should summarize milestones, not mirror the worker's activity feed. Good examples:
+
+- `Task <id> is running; I asked for a ready PR, report-only audit, and no live VPS changes.`
+- `The worker moved from repo inspection into implementation.`
+- `Validation is green and the worker is pushing the branch.`
+- `The worker is quiet for about 35 seconds but still heartbeating; I will keep waiting.`
+
+Too much detail:
+
+- `It read the repo instructions, inventory, and group vars.`
+- `It read the service roles and host-maintenance roles.`
+- `It inspected the diff and applied a follow-up patch.`
+- `Still cooking.`
+- `I am waiting for the PR URL.` after each `wait_tasks` call.
+
+If the message only proves that the wait loop is continuing, omit it.
+
 ## External Checks And CI
 
 Avoid nested passive waiting. A repo worker should not spend a long turn polling GitHub Actions or CI while the orchestrator polls the worker and narrates each poll.
