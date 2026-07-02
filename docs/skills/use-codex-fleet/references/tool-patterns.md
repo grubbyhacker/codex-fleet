@@ -107,30 +107,23 @@ Pseudo-flow:
 5. Save the maximum returned `event.seq`; pass it as `sinceEventSeq` on the next wait.
 6. If a snapshot is terminal or stale, call `get_task`.
 7. If the terminal state is surprising, such as `timed_out` after recent activity, call `get_task_history` before deciding whether to resume, inspect the worktree, or report a blocker.
-8. If still running, continue waiting. Briefly update the user only when there are useful new events, first/occasional task observations, terminal/stale transitions, or meaningful elapsed time.
+8. If still running, continue waiting. Do not send a user-visible message just because the wait loop continues.
 
 `wait_tasks` returns immediately when new events exist or when a snapshot already matches `returnOnStatuses`. Otherwise it sleeps up to `maxWaitSeconds` capped at 45 seconds.
 
-When a running worker emits no detail during a wait slice, `wait_tasks` can return a `task_observation` event with the current state, `lastActivityAt`, and quiet duration. Use those facts to keep your own confidence in the task state, and surface them sparingly rather than narrating every quiet wait. Do not call `get_task` repeatedly or shorten waits only because a worker has not emitted detailed progress. Fleet will mark quiet workers `stale` when the daemon's stale threshold is reached.
+When a running worker emits no detail during a wait slice, `wait_tasks` can return a `task_observation` event with the current state, `lastActivityAt`, and quiet duration. Use those facts to keep your own confidence in the task state, not as a reason to post another status line. Do not call `get_task` repeatedly or shorten waits only because a worker has not emitted detailed progress. Fleet will mark quiet workers `stale` when the daemon's stale threshold is reached.
 
-User-visible status should summarize milestones, not mirror the worker's activity feed. Good examples:
-
-- `Task <id> is running; I asked for a ready PR, report-only audit, and no live VPS changes.`
-- `The worker moved from repo inspection into implementation.`
-- `Validation is green and the worker is pushing the branch.`
-- `The worker is quiet for about 35 seconds but still heartbeating; I will keep waiting.`
-- `The worker timed out after recent activity, so I am inspecting its final state and history before deciding next steps.`
-
-Too much detail:
+Do not narrate wait loops. In particular, do not post messages like:
 
 - `Checking the Hermes role fix state now.`
 - `It read the repo instructions, inventory, and group vars.`
 - `It read the service roles and host-maintenance roles.`
 - `It inspected the diff and applied a follow-up patch.`
 - `Still cooking.`
+- `The worker is quiet for about 35 seconds but still heartbeating; I will keep waiting.`
 - `I am waiting for the PR URL.` after each `wait_tasks` call.
 
-If the message only proves that the wait loop is continuing, omit it.
+Only update the user for material milestones: task delegated, terminal/stale/failed state, a concrete blocker, or a decision the orchestrator must make. If the message only proves that the wait loop is continuing, omit it.
 
 ## External Checks And CI
 
