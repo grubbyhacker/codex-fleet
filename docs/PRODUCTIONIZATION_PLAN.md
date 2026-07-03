@@ -64,8 +64,11 @@ Required environment:
 ```text
 CODEX_FLEET_WORKER_BACKEND=codex
 CODEX_FLEET_CODEX_COMMAND=/Applications/Codex.app/Contents/Resources/codex
-CODEX_FLEET_CODEX_MODEL=gpt-5.3-codex-spark
 ```
+
+Do not set `CODEX_FLEET_CODEX_MODEL` by default. Let Codex use the operator's
+configured default model unless a worker model is intentionally pinned for a
+specific experiment.
 
 Add or complete practical service commands:
 
@@ -199,5 +202,5 @@ Real-use readiness:
 - `~/.codex-fleet` remains the production state dir.
 - `codex-fleet` is the official v1 MCP name everywhere.
 - `codex-fleet-poc` is the preserved fallback name.
-- Use `gpt-5.3-codex-spark` as the initial worker model.
+- Do not pin an initial worker model in service config; model pins are explicit overrides.
 - Production-impacting work may begin after service, registry, and client smoke tests pass; issues found during real use should be fixed in v1 rather than blocking rollout indefinitely.

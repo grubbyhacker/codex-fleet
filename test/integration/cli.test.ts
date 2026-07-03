@@ -119,6 +119,8 @@ describe("cli views", () => {
 
   it("prints a macOS LaunchAgent plist", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-cli-service-"));
+    const previousModel = process.env.CODEX_FLEET_CODEX_MODEL;
+    delete process.env.CODEX_FLEET_CODEX_MODEL;
     try {
       const plist = await runCli(root, "service", "launch-agent", "print");
       expect(plist).toContain("dev.codex-fleet.daemon");
@@ -131,10 +133,11 @@ describe("cli views", () => {
       expect(plist).toContain("CODEX_FLEET_STATE_DIR");
       expect(plist).toContain("CODEX_FLEET_WORKER_BACKEND");
       expect(plist).toContain("CODEX_FLEET_CODEX_COMMAND");
-      expect(plist).toContain("CODEX_FLEET_CODEX_MODEL");
-      expect(plist).toContain("gpt-5.3-codex-spark");
+      expect(plist).not.toContain("CODEX_FLEET_CODEX_MODEL");
+      expect(plist).not.toContain("gpt-5.3-codex-spark");
       expect(plist).toContain(root);
     } finally {
+      restoreEnv("CODEX_FLEET_CODEX_MODEL", previousModel);
       rmSync(root, { force: true, recursive: true });
     }
   });
@@ -166,6 +169,14 @@ function stringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   return Object.fromEntries(
     Object.entries(env).filter((entry): entry is [string, string] => Boolean(entry[1]))
   );
+}
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
 }
 
 async function delegatePatch(rpc: { socketPath: string; clientId: string; token: string }) {

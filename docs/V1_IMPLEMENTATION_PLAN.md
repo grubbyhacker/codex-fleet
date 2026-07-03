@@ -116,8 +116,8 @@ Implement as one atomic milestone. Sub-units can land behind tests, but Phase 1 
 Keep these opt-in because they spend paid tokens.
 
 - Add `mise exec -- bun run test:e2e:codex`, skipped unless `CODEX_FLEET_RUN_CODEX_E2E=1`.
-- Use `CODEX_FLEET_E2E_MODEL`, defaulting to `gpt-5.3-codex-spark` as the cheapest currently exposed coding model in this environment; allow override without code changes.
-- Add a cheap preflight that runs one minimal `codex exec --ephemeral -m "$CODEX_FLEET_E2E_MODEL"` prompt and fails clearly if the model is unavailable.
+- Use `CODEX_FLEET_E2E_MODEL`, falling back to the operator's configured Codex default; allow override without code changes.
+- Add a cheap preflight that runs one minimal `codex exec --ephemeral` prompt, adding `-m "$CODEX_FLEET_E2E_MODEL"` only when an override is set, and fails clearly if the selected model is unavailable.
 - E2E scenarios:
   - actual Codex shell/research task returns a final response through daemon and adapter;
   - actual Codex repo patch task edits a tiny temp fixture repo in an isolated worktree, runs a trivial verify command, and leaves the base checkout untouched;
