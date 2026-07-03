@@ -11,17 +11,24 @@ Use the official `codex-fleet` MCP tools.
 
 ## Core Rules
 
-1. Start by checking context:
+1. Use Fleet only when it adds orchestration value:
+   - Direct local work is usually better for a single narrow task in the current checkout when no isolated worktree, durable background worker, parallelism, shell scratch isolation, or PR postcondition enforcement is needed.
+   - Do not delegate just because a task mutates a repository. If the user did not ask for Fleet and the task can be handled safely in the current checkout, do the work directly.
+   - Use Fleet for one task only when it needs Fleet-owned isolation, durable execution, a clean PR handoff, or another concrete Fleet capability.
+   - Use Fleet for multiple independent tasks, cross-repo work, long-running work that should survive the orchestrator's active turn, or work that benefits from separate worker context.
+   - If you delegate only one worker, keep user-visible updates sparse: report delegation, terminal/stale/failed state, concrete blockers, and final result.
+
+2. Start by checking context:
    - Use `list_targets` when you are not sure which repo or shell targets exist.
    - Use `initialize` with a short `sessionName` when starting a coordinated session and the tool is available.
    - Use `list_tasks` before restarting services, cleaning action queues, or assuming no workers are active.
 
-2. Delegate asynchronously:
+3. Delegate asynchronously:
    - Use `delegate_task` for meaningful work.
    - Treat the returned `taskId` as the durable handle.
    - Keep the full task id. Short ids can become ambiguous or fail after daemon reloads.
 
-3. Wait without churn:
+4. Wait without churn:
    - Use `wait_tasks` as the primary monitoring primitive.
    - Do not run shell sleeps such as `sleep 30` to wait for Fleet work. `wait_tasks` is the wait primitive.
    - Do not poll a known task with repeated `list_tasks`; use `wait_tasks` for active monitoring and `get_task` after terminal/stale/unexpected states. `list_tasks` is for broad context checks, not per-task wait loops.
@@ -33,32 +40,32 @@ Use the official `codex-fleet` MCP tools.
    - Only update the user for material milestones: task delegated, terminal/stale/failed state, a concrete blocker, or a decision the orchestrator must make.
    - Do not say things like "Checking state now", "It read the repo instructions", "It read the service roles", "It inspected the diff", "Still cooking", "The worker is quiet but still running", or "I am waiting for the PR URL" after each wait.
 
-4. Keep ownership of pending work:
+5. Keep ownership of pending work:
    - If Fleet tasks are still running and you have no other immediate work, keep waiting with `wait_tasks`.
    - Do not return control to the user merely because workers are quiet.
    - Do not describe a lack of detailed progress as "normal for Fleet" without also reporting observed task ids, states, and last activity/quiet timing.
    - Returning control is appropriate when all tasks are terminal, blocked, stale and needing a user choice, explicitly paused by the user, or impossible to continue without external input.
    - If you must return control with pending tasks, report the exact task ids, current states, and the next `wait_tasks` call to make.
 
-5. Inspect before acting:
+6. Inspect before acting:
    - Use `get_task_history` when the state changed unexpectedly or the final result is not enough.
    - Remember that Fleet reports operational state. The orchestrator still decides whether the worker semantically completed the user's goal.
 
-6. Handle external waits deliberately:
+7. Handle external waits deliberately:
    - Do not resume or delegate a repo worker only to poll GitHub Actions, CI, deploy status, or other external systems.
    - For normal PR handoff, accept a worker's PR URL plus one concrete check snapshot; if checks are still pending, report that pending state and stop unless the user asked you to carry through completion.
    - If the user asked for completion after external checks, the orchestrator should wait directly on the external system with a purpose-built tool or CLI, update the user only on material status changes or final outcome, then resume the worker only if code changes, merge, cleanup, or failure triage is needed.
    - If a worker is already waiting on an external system as part of explicit delivery authority, let it work quietly through `wait_tasks`; do not narrate every poll or observation.
    - Be explicit in prompts: "ready PR and stop" is different from "merge/deploy after green checks." Do not rely on vague phrases like "run until the PR is complete."
 
-7. Release Fleet-owned resources without becoming the janitor:
+8. Release Fleet-owned resources without becoming the janitor:
    - Treat `end_task` as release of Fleet-owned task resources, not as post-merge repository hygiene.
    - For normal PR handoff, inspect the terminal task, report the ready PR and one check snapshot, then call `end_task` only if you no longer need the task worktree for follow-up.
    - Do not wait for the human to merge a PR just so you can clean up afterward. If the operator later says a PR was merged, do not run `git fetch`, fast-forward a checkout, delete local branches, push branch deletions, or launch a cleanup worker unless they explicitly ask.
    - If `end_task` reports cleanup conflict because a worktree is dirty, inspect `get_task` before removing anything.
    - Use CLI/TUI `wipe-clean` only as an operator cleanup action for terminal Fleet-owned resources. It intentionally discards dirty/ahead worktrees and skips live tasks.
 
-8. Do not interrupt live workers casually:
+9. Do not interrupt live workers casually:
    - Ordinary orchestrators should not administer Fleet infrastructure. Do not restart the daemon, unload the LaunchAgent, kill adapter processes, or run broad cleanup as part of normal delegated work.
    - If the Fleet MCP transport is closed, do not treat that as a repo-work blocker. Continue with direct repo reads or other non-Fleet tools when that is safe, and tell the operator that the MCP client needs to reconnect if Fleet delegation is required.
    - If the user asks you to develop, debug, deploy, or administer Codex Fleet itself, this skill is the wrong tool. Work directly in the `codex-fleet` repo and its operational docs instead of following orchestrator delegation guidance.
