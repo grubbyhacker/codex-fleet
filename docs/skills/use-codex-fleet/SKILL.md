@@ -1,13 +1,13 @@
 ---
 name: use-codex-fleet
-description: "Use Codex Fleet to delegate work to local Codex worker agents through the official codex-fleet MCP server. Use when you need Fleet to hand a task to repo or shell workers, monitor delegated worker tasks without excessive polling, choose delivery modes/model tiers, or release Fleet-owned resources after delegated work. Do not use for developing, debugging, deploying, or administering Codex Fleet itself; for that, work directly in the codex-fleet repo and its operational docs. Prefer this skill over the old codex-fleet-poc unless the user explicitly asks for the prototype."
+description: "Use Codex Fleet to delegate work to local Codex worker agents through the official codex-fleet MCP server. Use when you need Fleet to hand a task to repo or shell workers, monitor delegated worker tasks without excessive polling, choose delivery modes/model tiers, or release Fleet-owned resources after delegated work. Do not use for developing, debugging, deploying, or administering Codex Fleet itself; for that, work directly in the codex-fleet repo and its operational docs."
 ---
 
 # Use Codex Fleet
 
 Codex Fleet is a local orchestration utility. Treat it as a task runner and state tracker for Codex workers, not as another reasoning authority.
 
-Use the official `codex-fleet` MCP tools by default. Do not use `codex-fleet-poc` unless the user explicitly asks for the prototype.
+Use the official `codex-fleet` MCP tools.
 
 ## Core Rules
 
