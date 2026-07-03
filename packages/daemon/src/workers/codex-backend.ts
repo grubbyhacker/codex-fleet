@@ -201,6 +201,7 @@ function workerInstructions(input: WorkerInput): string {
     input.branch ? `Branch: ${input.branch}` : undefined,
     workspace,
     largeArtifactInstructions(),
+    environmentFrictionInstructions(),
     "shell" in input.request.target ? boundedShellDiagnosticsInstructions() : undefined,
     "repo" in input.request.target ? externalCheckWaitingInstructions() : undefined,
     "repo" in input.request.target ? mergePolicyInstructions(input) : undefined,
@@ -216,6 +217,13 @@ function largeArtifactInstructions(): string {
     "Large artifact/context guardrail: for generated dashboards, lockfiles, vendored data, snapshots, or other large files, avoid loading or emitting whole files when a targeted edit will work.",
     "Use structured tools such as jq, formatters, or small scripts to make narrow changes; inspect focused slices and verify with targeted checks.",
     "If the task requires both broad investigation and a large rewrite, do the smallest safe edit or stop and report that the work should be split into smaller tasks."
+  ].join(" ");
+}
+
+function environmentFrictionInstructions(): string {
+  return [
+    "Environment friction reporting: if a useful command, library, parser, or runtime module is missing and you use a fallback or workaround, include one final-response line starting with `Fleet environment friction:`.",
+    "Keep the line concise and name the missing tool/module and fallback; do not include secrets."
   ].join(" ");
 }
 

@@ -320,6 +320,80 @@ describe("daemon rpc", () => {
     }
   });
 
+  it("records environment friction events from worker output", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-rpc-friction-"));
+    const paths = resolveFleetPaths(root);
+    const previousResponse = process.env.CODEX_FLEET_FAKE_WORKER_RESPONSE;
+    const previousStderr = process.env.CODEX_FLEET_FAKE_WORKER_STDERR;
+    process.env.CODEX_FLEET_FAKE_WORKER_RESPONSE =
+      "Fleet environment friction: default Python lacks PyYAML, used Ruby YAML parser instead.";
+    process.env.CODEX_FLEET_FAKE_WORKER_STDERR = "zsh:1: yq: command not found";
+    let daemon = await startDaemon(paths);
+    const orchestrator = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: orchestrator.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "friction fixture"
+      })) as { taskId: string };
+      await waitUntilExited(rpc, delegated.taskId);
+
+      const history = (await callDaemon(rpc, "get_task_history", {
+        taskId: delegated.taskId
+      })) as { events: Array<{ type: string; summary: string }> };
+      const frictionEvents = history.events.filter(
+        (event) => event.type === "environment_friction"
+      );
+      expect(frictionEvents).toHaveLength(2);
+      expect(frictionEvents.map((event) => JSON.parse(event.summary))).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "tool_fallback",
+            source: "final_response",
+            evidence: "default Python lacks PyYAML, used Ruby YAML parser instead."
+          }),
+          expect.objectContaining({
+            kind: "missing_command",
+            source: "worker_stderr",
+            runtime: "shell",
+            tool: "yq"
+          })
+        ])
+      );
+      expect(
+        history.events.findIndex((event) => event.type === "environment_friction")
+      ).toBeLessThan(
+        history.events.findIndex(
+          (event) => event.type === "task_state" && event.summary.includes('"exited"')
+        )
+      );
+
+      await daemon.close();
+      daemon = await startDaemon(paths);
+      const afterRestart = (await callDaemon(rpc, "get_task_history", {
+        taskId: delegated.taskId
+      })) as { events: Array<{ type: string }> };
+      expect(
+        afterRestart.events.filter((event) => event.type === "environment_friction")
+      ).toHaveLength(2);
+    } finally {
+      if (previousResponse === undefined) {
+        delete process.env.CODEX_FLEET_FAKE_WORKER_RESPONSE;
+      } else {
+        process.env.CODEX_FLEET_FAKE_WORKER_RESPONSE = previousResponse;
+      }
+      if (previousStderr === undefined) {
+        delete process.env.CODEX_FLEET_FAKE_WORKER_STDERR;
+      } else {
+        process.env.CODEX_FLEET_FAKE_WORKER_STDERR = previousStderr;
+      }
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("resumes an exited task on the same task id and worker thread", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-rpc-resume-"));
     const paths = resolveFleetPaths(root);

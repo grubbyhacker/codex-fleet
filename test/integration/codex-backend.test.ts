@@ -272,6 +272,25 @@ describe("codex worker backend", () => {
     expect(args["developer-instructions"]).toContain("split into smaller tasks");
   });
 
+  it("asks workers to report missing tool fallbacks", () => {
+    const args = codexWorkerToolArguments(
+      {
+        taskId: "task-friction",
+        request: {
+          target: { shell: true },
+          deliveryMode: "research_only",
+          risk: "standard",
+          prompt: "Inspect structured data"
+        }
+      },
+      "/tmp/codex-fleet-shell/task-friction"
+    );
+
+    expect(args["developer-instructions"]).toContain("Environment friction reporting");
+    expect(args["developer-instructions"]).toContain("Fleet environment friction:");
+    expect(args["developer-instructions"]).toContain("missing tool/module and fallback");
+  });
+
   it("marks codex backend error payloads as failed worker results", () => {
     const content = JSON.stringify(
       {
