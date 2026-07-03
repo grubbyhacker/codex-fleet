@@ -24,6 +24,7 @@ import {
 } from "@codex-fleet/shared";
 
 import { CleanupManager } from "./cleanup/cleanup-manager.js";
+import { detectEnvironmentFriction } from "./environment-friction.js";
 import { resolveGitExecutable } from "./git.js";
 import type { FleetPaths } from "./paths.js";
 import { RepoRegistry } from "./registry/repo-registry.js";
@@ -387,6 +388,10 @@ export class FleetService {
         }
 
         const finalResponse = appendFleetPostCheck(result.finalResponse, finalAttention);
+        this.appendEnvironmentFriction(currentInput.taskId, {
+          finalResponse,
+          workerStderr: result.workerStderr
+        });
         this.append("task_state", currentInput.taskId, {
           state: "exited",
           exitCode: result.exitCode,
@@ -401,11 +406,15 @@ export class FleetService {
       }
     } catch (error) {
       const workerStderr = error instanceof WorkerRunError ? error.workerStderr : undefined;
+      const workerError = error instanceof Error ? error.message : String(error);
+      this.appendEnvironmentFriction(input.taskId, {
+        workerError,
+        workerStderr
+      });
       this.append("task_state", input.taskId, {
         state: error instanceof WorkerRunError ? error.terminalState : "failed_to_start",
-        finalResponse: error instanceof Error ? error.message : String(error),
-        finalResponsePreview:
-          error instanceof Error ? preview(error.message) : preview(String(error)),
+        finalResponse: workerError,
+        finalResponsePreview: preview(workerError),
         workerStderr,
         workerStderrPreview:
           error instanceof WorkerRunError ? error.workerStderrPreview : undefined,
@@ -542,6 +551,15 @@ export class FleetService {
     this.eventLog.append(event);
     this.state.apply(event);
     return event;
+  }
+
+  private appendEnvironmentFriction(
+    taskId: string,
+    input: Parameters<typeof detectEnvironmentFriction>[0]
+  ): void {
+    for (const friction of detectEnvironmentFriction(input)) {
+      this.append("environment_friction", taskId, friction);
+    }
   }
 
   private refreshStaleTasks(): void {
