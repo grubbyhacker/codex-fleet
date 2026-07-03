@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import type { Stream } from "node:stream";
 
+import type { ModelTier } from "@codex-fleet/shared";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { NotificationSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -27,6 +28,11 @@ type CodexBackendError = {
     param?: string;
   };
   status?: number;
+};
+
+export type CodexWorkerConfig = {
+  model?: string;
+  modelReasoningEffort?: string;
 };
 
 const CodexEventNotificationSchema = NotificationSchema.extend({
@@ -127,10 +133,11 @@ export function resolveCodexCommand(candidates = defaultCodexCommandCandidates()
 }
 
 export function codexWorkerToolArguments(input: WorkerInput, cwd: string): Record<string, unknown> {
+  const workerConfig = resolveCodexWorkerConfig(input.actualModelTier);
   return stripUndefined({
     prompt: input.request.prompt,
     cwd,
-    model: process.env.CODEX_FLEET_CODEX_MODEL ?? process.env.CODEX_FLEET_E2E_MODEL,
+    model: workerConfig.model,
     sandbox: "danger-full-access",
     "approval-policy": "never",
     "developer-instructions": workerInstructions(input)
@@ -138,18 +145,58 @@ export function codexWorkerToolArguments(input: WorkerInput, cwd: string): Recor
 }
 
 export function codexWorkerCommandArgs(input: WorkerInput): string[] {
+  const args: string[] = [];
   if (!input.stopHook) {
-    return ["mcp-server"];
+    args.push("mcp-server");
+  } else {
+    args.push(
+      "--dangerously-bypass-hook-trust",
+      "mcp-server",
+      "-c",
+      "features.hooks=true",
+      "-c",
+      stopHookConfigOverride(input.stopHook)
+    );
   }
 
-  return [
-    "--dangerously-bypass-hook-trust",
-    "mcp-server",
-    "-c",
-    "features.hooks=true",
-    "-c",
-    stopHookConfigOverride(input.stopHook)
-  ];
+  const workerConfig = resolveCodexWorkerConfig(input.actualModelTier);
+  if (workerConfig.modelReasoningEffort) {
+    args.push("-c", `model_reasoning_effort=${JSON.stringify(workerConfig.modelReasoningEffort)}`);
+  }
+  return args;
+}
+
+export function resolveCodexWorkerConfig(tier: ModelTier | undefined): CodexWorkerConfig {
+  return stripUndefined({
+    model: firstConfigured([
+      process.env.CODEX_FLEET_CODEX_MODEL,
+      process.env.CODEX_FLEET_E2E_MODEL,
+      tier ? process.env[`CODEX_FLEET_CODEX_MODEL_${envTierSuffix(tier)}`] : undefined,
+      defaultCodexModelForTier(tier)
+    ]),
+    modelReasoningEffort: firstConfigured([
+      process.env.CODEX_FLEET_CODEX_REASONING_EFFORT,
+      process.env.CODEX_FLEET_E2E_REASONING_EFFORT,
+      tier ? process.env[`CODEX_FLEET_CODEX_REASONING_EFFORT_${envTierSuffix(tier)}`] : undefined,
+      defaultCodexReasoningEffortForTier(tier)
+    ])
+  });
+}
+
+function defaultCodexModelForTier(tier: ModelTier | undefined): string | undefined {
+  return tier === "cheap" ? "gpt-5.4-mini" : undefined;
+}
+
+function defaultCodexReasoningEffortForTier(tier: ModelTier | undefined): string | undefined {
+  return tier === "cheap" ? "medium" : undefined;
+}
+
+function envTierSuffix(tier: ModelTier): string {
+  return tier.toUpperCase();
+}
+
+function firstConfigured(values: Array<string | undefined>): string | undefined {
+  return values.find((value) => value !== undefined && value.length > 0);
 }
 
 function codexToolCall(

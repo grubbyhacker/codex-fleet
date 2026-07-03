@@ -39,7 +39,7 @@ import {
   type TaskStatePayload
 } from "./store/state.js";
 import { WorkerRunError, type WorkerBackend } from "./workers/backend.js";
-import { workerBackendFromEnv } from "./workers/codex-backend.js";
+import { resolveCodexWorkerConfig, workerBackendFromEnv } from "./workers/codex-backend.js";
 import { dirtyWorktreeStopHook } from "./workers/dirty-worktree-stop-hook.js";
 import { WorktreeManager } from "./worktree/worktree-manager.js";
 
@@ -192,6 +192,7 @@ export class FleetService {
     }
 
     const modelRouting = routeModelTier(request, defaultModelTier);
+    const workerConfig = resolveCodexWorkerConfig(modelRouting.actualModel);
 
     if (repoForWorktree) {
       const source =
@@ -218,6 +219,8 @@ export class FleetService {
       resumeTaskId: request.resumeTaskId,
       modelTier: request.modelTier,
       actualModel: modelRouting.actualModel,
+      workerModel: workerConfig.model,
+      workerReasoningEffort: workerConfig.modelReasoningEffort,
       prompt: request.prompt,
       promptPreview: preview(request.prompt),
       ownerSession,
@@ -243,7 +246,8 @@ export class FleetService {
       branch,
       worktreePath,
       shellPath,
-      mergePolicy: repoForWorktree?.mergePolicy
+      mergePolicy: repoForWorktree?.mergePolicy,
+      actualModelTier: modelRouting.actualModel
     };
     void this.runWorker({
       ...workerInput,
@@ -266,13 +270,25 @@ export class FleetService {
     }
 
     const now = new Date().toISOString();
+    const repo = "repo" in task.target ? this.registry.get(task.target.repo) : undefined;
+    const modelRouting = routeModelTier(request, repo?.defaultModelTier ?? "standard");
+    const workerConfig = resolveCodexWorkerConfig(modelRouting.actualModel);
     this.append("task_resumed", task.id, {
       prompt: request.prompt,
       promptPreview: preview(request.prompt),
       deliveryMode: request.deliveryMode,
       risk: request.risk,
-      requestedModel: request.modelTier
+      requestedModel: request.modelTier,
+      actualModel: modelRouting.actualModel,
+      workerModel: workerConfig.model,
+      workerReasoningEffort: workerConfig.modelReasoningEffort
     });
+    if (
+      modelRouting.reason === "safety_upgrade" ||
+      modelRouting.reason === "requested_unavailable_fallback"
+    ) {
+      this.append("model_routing", task.id, modelRouting);
+    }
     this.append("task_state", task.id, {
       state: "running",
       lastActivityAt: now
@@ -288,8 +304,8 @@ export class FleetService {
       branch: task.branch,
       worktreePath: task.worktreePath,
       shellPath: task.shellPath,
-      mergePolicy:
-        "repo" in task.target ? this.registry.get(task.target.repo)?.mergePolicy : undefined,
+      mergePolicy: repo?.mergePolicy,
+      actualModelTier: modelRouting.actualModel,
       codexThreadId: task.codexThreadId
     };
     void this.runWorker({
@@ -357,7 +373,11 @@ export class FleetService {
             promptPreview: preview(repairPrompt),
             deliveryMode: currentInput.request.deliveryMode,
             risk: currentInput.request.risk,
-            requestedModel: currentInput.request.modelTier
+            requestedModel: currentInput.request.modelTier,
+            actualModel: currentInput.actualModelTier,
+            workerModel: resolveCodexWorkerConfig(currentInput.actualModelTier).model,
+            workerReasoningEffort: resolveCodexWorkerConfig(currentInput.actualModelTier)
+              .modelReasoningEffort
           });
           this.append("task_state", currentInput.taskId, {
             state: "running",

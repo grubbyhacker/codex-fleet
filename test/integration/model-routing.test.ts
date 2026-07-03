@@ -10,6 +10,40 @@ import { callDaemon } from "../../packages/daemon/src/rpc/client.js";
 import { startDaemon } from "../../packages/daemon/src/rpc/server.js";
 
 describe("model tier routing", () => {
+  it("records concrete worker model settings for cheap tier tasks", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-model-worker-"));
+    const paths = resolveFleetPaths(root);
+    const daemon = await startDaemon(paths);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        risk: "low",
+        modelTier: "cheap",
+        prompt: "cheap research"
+      })) as { taskId: string };
+      const result = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
+        task: {
+          requestedModel?: string;
+          actualModel?: string;
+          workerModel?: string;
+          workerReasoningEffort?: string;
+        };
+      };
+
+      expect(result.task.requestedModel).toBe("cheap");
+      expect(result.task.actualModel).toBe("cheap");
+      expect(result.task.workerModel).toBe("gpt-5.4-mini");
+      expect(result.task.workerReasoningEffort).toBe("medium");
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("records requested and actual model tier with safe upgrades", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-model-"));
     const paths = resolveFleetPaths(root);

@@ -80,11 +80,11 @@ Choose the target deliberately:
 
 Choose model tier by risk and complexity:
 
-- `cheap`: smoke tests, simple read-only checks, tiny mechanical work.
-- `standard`: normal repo tasks and implementation slices.
+- `cheap`: default choice for smoke tests, codebase exploration, read-heavy scans, simple read-only checks, and tiny mechanical work. Fleet routes this tier to a smaller worker model when allowed.
+- `standard`: normal repo tasks and implementation slices that need more judgment than a scan but are not high-risk.
 - `strong`: high-risk changes, ambiguous architecture, security-sensitive work, or work likely to require deep judgment.
 
-Fleet may upgrade the actual model for safety or availability. Check `requestedModel` and `actualModel` in task snapshots when model choice matters.
+Fleet may upgrade the actual model tier for safety or availability. Check `requestedModel`, `actualModel`, `workerModel`, and `workerReasoningEffort` in task snapshots when model choice matters.
 
 ## Worker Prompts
 

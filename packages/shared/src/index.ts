@@ -124,6 +124,8 @@ export const taskSnapshotSchema = z.object({
   lastActivityAt: z.string().min(1).optional(),
   requestedModel: modelTierSchema.optional(),
   actualModel: modelTierSchema.optional(),
+  workerModel: z.string().min(1).optional(),
+  workerReasoningEffort: z.string().min(1).optional(),
   codexThreadId: z.string().min(1).optional()
 });
 export type TaskSnapshot = z.infer<typeof taskSnapshotSchema>;

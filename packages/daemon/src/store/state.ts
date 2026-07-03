@@ -14,6 +14,8 @@ export type TaskCreatedPayload = Omit<DelegateTaskRequest, "prompt"> & {
   prompt?: string;
   promptPreview: string;
   actualModel: TaskSnapshot["actualModel"];
+  workerModel?: TaskSnapshot["workerModel"];
+  workerReasoningEffort?: TaskSnapshot["workerReasoningEffort"];
 };
 
 export type TaskResumedPayload = {
@@ -22,6 +24,9 @@ export type TaskResumedPayload = {
   deliveryMode: TaskSnapshot["deliveryMode"];
   risk: TaskSnapshot["risk"];
   requestedModel?: TaskSnapshot["requestedModel"];
+  actualModel?: TaskSnapshot["actualModel"];
+  workerModel?: TaskSnapshot["workerModel"];
+  workerReasoningEffort?: TaskSnapshot["workerReasoningEffort"];
 };
 
 export type TaskStatePayload = {
@@ -79,7 +84,9 @@ export class FleetState {
           prompt: payload.prompt,
           promptPreview: payload.promptPreview,
           requestedModel: payload.modelTier,
-          actualModel: payload.actualModel
+          actualModel: payload.actualModel,
+          workerModel: payload.workerModel,
+          workerReasoningEffort: payload.workerReasoningEffort
         })
       );
       return;
@@ -99,7 +106,10 @@ export class FleetState {
         risk: payload.risk,
         prompt: payload.prompt,
         promptPreview: payload.promptPreview,
-        requestedModel: payload.requestedModel
+        requestedModel: payload.requestedModel,
+        actualModel: payload.actualModel ?? existing.actualModel,
+        workerModel: payload.workerModel ?? existing.workerModel,
+        workerReasoningEffort: payload.workerReasoningEffort ?? existing.workerReasoningEffort
       });
       return;
     }
