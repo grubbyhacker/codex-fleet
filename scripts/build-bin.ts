@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 const outputs = [
@@ -13,17 +13,25 @@ rmSync(outDir, { force: true, recursive: true });
 mkdirSync(outDir, { recursive: true });
 
 for (const [entrypoint, name] of outputs) {
-  const proc = Bun.spawnSync([
-    process.execPath,
-    "build",
-    "--compile",
-    "--outfile",
-    join(outDir, name),
-    entrypoint
-  ]);
+  const proc = compileEntrypoint(entrypoint, name);
   if (proc.exitCode !== 0) {
-    process.stderr.write(proc.stderr.toString());
+    process.stderr.write(proc.stderr?.toString() ?? "");
     process.exit(proc.exitCode);
   }
   process.stdout.write(`built dist/bin/${name}\n`);
+}
+
+function compileEntrypoint(entrypoint: string, name: string): ReturnType<typeof Bun.spawnSync> {
+  try {
+    return Bun.spawnSync([
+      process.execPath,
+      "build",
+      "--compile",
+      "--outfile",
+      join(outDir, name),
+      entrypoint
+    ]);
+  } finally {
+    chmodSync(entrypoint, 0o644);
+  }
 }
