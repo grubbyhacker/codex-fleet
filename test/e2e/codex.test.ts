@@ -15,15 +15,15 @@ const describeCodex = runCodexE2e ? describe : describe.skip;
 
 describeCodex("real codex e2e", () => {
   it("preflights the configured Codex model", async () => {
-    const model = process.env.CODEX_FLEET_E2E_MODEL ?? "gpt-5.3-codex-spark";
-    console.warn(`Running paid Codex E2E preflight with model ${model}`);
+    const model = codexE2eModel();
+    console.warn(`Running paid Codex E2E preflight with ${codexE2eModelLabel(model)}`);
     const output = await runCodexPreflight(model);
     expect(output).toContain("codex-fleet-preflight-ok");
   }, 180_000);
 
   it("runs a minimal shell research task through the daemon", async () => {
-    const model = process.env.CODEX_FLEET_E2E_MODEL ?? "gpt-5.3-codex-spark";
-    console.warn(`Running paid Codex E2E with model ${model}`);
+    const model = codexE2eModel();
+    console.warn(`Running paid Codex E2E with ${codexE2eModelLabel(model)}`);
 
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-e2e-"));
     const paths = resolveFleetPaths(root);
@@ -51,8 +51,8 @@ describeCodex("real codex e2e", () => {
   }, 180_000);
 
   it("patches a tiny repo in an isolated worktree without touching the base checkout", async () => {
-    const model = process.env.CODEX_FLEET_E2E_MODEL ?? "gpt-5.3-codex-spark";
-    console.warn(`Running paid Codex repo E2E with model ${model}`);
+    const model = codexE2eModel();
+    console.warn(`Running paid Codex repo E2E with ${codexE2eModelLabel(model)}`);
 
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-e2e-repo-"));
     const repo = join(root, "base-repo");
@@ -93,8 +93,8 @@ describeCodex("real codex e2e", () => {
   }, 180_000);
 
   it("nudges a dirty review worktree before allowing stop", async () => {
-    const model = process.env.CODEX_FLEET_E2E_MODEL ?? "gpt-5.3-codex-spark";
-    console.warn(`Running paid Codex stop-hook E2E with model ${model}`);
+    const model = codexE2eModel();
+    console.warn(`Running paid Codex stop-hook E2E with ${codexE2eModelLabel(model)}`);
 
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-e2e-stop-hook-"));
     const repo = join(root, "base-repo");
@@ -143,7 +143,16 @@ describeCodex("real codex e2e", () => {
   }, 240_000);
 });
 
-async function runCodexPreflight(model: string): Promise<string> {
+function codexE2eModel(): string | undefined {
+  return process.env.CODEX_FLEET_E2E_MODEL ?? process.env.CODEX_FLEET_CODEX_MODEL;
+}
+
+function codexE2eModelLabel(model: string | undefined): string {
+  return model ? `model ${model}` : "the configured default Codex model";
+}
+
+async function runCodexPreflight(model: string | undefined): Promise<string> {
+  const modelArgs = model ? ["-m", model] : [];
   const proc = spawn(
     "codex",
     [
@@ -151,8 +160,7 @@ async function runCodexPreflight(model: string): Promise<string> {
       "exec",
       "--ephemeral",
       "--skip-git-repo-check",
-      "-m",
-      model,
+      ...modelArgs,
       "Reply exactly: codex-fleet-preflight-ok"
     ].slice(1),
     {
@@ -162,7 +170,7 @@ async function runCodexPreflight(model: string): Promise<string> {
   );
   const [stdout, stderr, exitCode] = await collectProcess(proc);
   if (exitCode !== 0) {
-    throw new Error(`Codex preflight failed for model ${model}: ${stderr}`);
+    throw new Error(`Codex preflight failed with ${codexE2eModelLabel(model)}: ${stderr}`);
   }
   return stdout;
 }
@@ -183,13 +191,13 @@ async function collectProcess(proc: ReturnType<typeof spawn>): Promise<[string, 
   ];
 }
 
-function useCodexBackend(model: string): () => void {
+function useCodexBackend(model: string | undefined): () => void {
   const previousBackend = process.env.CODEX_FLEET_WORKER_BACKEND;
   const previousTimeout = process.env.CODEX_FLEET_CODEX_TIMEOUT_MS;
   const previousModel = process.env.CODEX_FLEET_E2E_MODEL;
   process.env.CODEX_FLEET_WORKER_BACKEND = "codex";
   process.env.CODEX_FLEET_CODEX_TIMEOUT_MS = previousTimeout ?? "120000";
-  process.env.CODEX_FLEET_E2E_MODEL = model;
+  restoreEnv("CODEX_FLEET_E2E_MODEL", model);
 
   return () => {
     restoreEnv("CODEX_FLEET_WORKER_BACKEND", previousBackend);

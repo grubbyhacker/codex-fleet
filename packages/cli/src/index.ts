@@ -454,8 +454,7 @@ function launchAgentEnvironment(): Array<[string, string]> {
       ].join(":")
     ],
     ["CODEX_FLEET_WORKER_BACKEND", "codex"],
-    ["CODEX_FLEET_CODEX_COMMAND", "/Applications/Codex.app/Contents/Resources/codex"],
-    ["CODEX_FLEET_CODEX_MODEL", "gpt-5.3-codex-spark"]
+    ["CODEX_FLEET_CODEX_COMMAND", "/Applications/Codex.app/Contents/Resources/codex"]
   ]);
   for (const [key, value] of Object.entries(process.env)) {
     if (value && key !== "PATH") {
