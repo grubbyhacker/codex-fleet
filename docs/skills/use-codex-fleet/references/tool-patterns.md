@@ -51,6 +51,20 @@ Repo merge policies:
 - `agent_merge_explicit`: merge only when the task prompt explicitly instructs that PR to be merged.
 - `agent_merge_allowed`: merge when delivery mode, prompt, repo rules, and checks allow it.
 
+## When Not To Delegate
+
+Do not use Fleet reflexively for every repo mutation. Direct local work is usually
+better for a single narrow task in the current checkout when the orchestrator can
+make the edit, validate it, and hand it off without needing Fleet-owned isolation,
+durable background execution, parallel workers, shell scratch isolation, or PR
+postcondition enforcement.
+
+Use Fleet for a single task only when one of those concrete Fleet capabilities is
+part of the value. Use Fleet by default for independent parallel tasks, cross-repo
+coordination, long-running work that should survive the orchestrator's active
+turn, or work where a clean worker-owned branch/worktree/PR handoff materially
+reduces risk.
+
 ## Typical Repo Research Delegation
 
 ```json
@@ -64,6 +78,9 @@ Repo merge policies:
 ```
 
 ## Typical Repo PR Delegation
+
+Use this pattern when Fleet-owned isolation or PR handoff is useful. It is not a
+requirement for every repository edit.
 
 ```json
 {
