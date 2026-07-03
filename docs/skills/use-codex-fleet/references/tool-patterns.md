@@ -2,7 +2,7 @@
 
 ## MCP Tools
 
-Use the official `mcp__codex_fleet` server. Avoid `mcp__codex_fleet_poc` unless the user explicitly asks for the old prototype.
+Use the official `mcp__codex_fleet` server.
 
 Available MCP methods:
 
