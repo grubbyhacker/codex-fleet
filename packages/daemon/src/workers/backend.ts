@@ -1,4 +1,4 @@
-import type { DelegateTaskRequest, MergePolicy } from "@codex-fleet/shared";
+import type { DelegateTaskRequest, MergePolicy, ModelTier } from "@codex-fleet/shared";
 
 export type WorkerActivityTelemetry = {
   eventType?: string;
@@ -24,6 +24,7 @@ export type WorkerInput = {
   shellPath?: string;
   branch?: string;
   mergePolicy?: MergePolicy;
+  actualModelTier?: ModelTier;
   codexThreadId?: string;
   stopHook?: WorkerStopHook;
   onActivity?: (activity: WorkerActivity) => void;

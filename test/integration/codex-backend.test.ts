@@ -11,6 +11,7 @@ import {
   codexWorkerCommandArgs,
   codexWorkerResultFromToolResult,
   codexWorkerToolArguments,
+  resolveCodexWorkerConfig,
   resolveCodexCommand
 } from "../../packages/daemon/src/workers/codex-backend.js";
 
@@ -67,6 +68,54 @@ describe("codex worker backend", () => {
       sandbox: "danger-full-access",
       "approval-policy": "never"
     });
+  });
+
+  it("maps cheap workers to GPT-5.4 mini with medium reasoning", () => {
+    const input = {
+      taskId: "task-cheap",
+      actualModelTier: "cheap" as const,
+      request: {
+        target: { shell: true as const },
+        deliveryMode: "research_only" as const,
+        risk: "low" as const,
+        modelTier: "cheap" as const,
+        prompt: "Inspect gh availability"
+      }
+    };
+
+    expect(resolveCodexWorkerConfig("cheap")).toEqual({
+      model: "gpt-5.4-mini",
+      modelReasoningEffort: "medium"
+    });
+    expect(codexWorkerToolArguments(input, "/tmp/codex-fleet-worker")).toMatchObject({
+      model: "gpt-5.4-mini"
+    });
+    expect(codexWorkerCommandArgs(input)).toEqual([
+      "mcp-server",
+      "-c",
+      'model_reasoning_effort="medium"'
+    ]);
+  });
+
+  it("lets standard and strong workers inherit the operator default model", () => {
+    expect(resolveCodexWorkerConfig("standard")).toEqual({});
+    expect(resolveCodexWorkerConfig("strong")).toEqual({});
+  });
+
+  it("honors explicit worker model and reasoning overrides", () => {
+    const previousModel = process.env.CODEX_FLEET_CODEX_MODEL_CHEAP;
+    const previousReasoning = process.env.CODEX_FLEET_CODEX_REASONING_EFFORT_CHEAP;
+    process.env.CODEX_FLEET_CODEX_MODEL_CHEAP = "gpt-5.3-codex-spark";
+    process.env.CODEX_FLEET_CODEX_REASONING_EFFORT_CHEAP = "high";
+    try {
+      expect(resolveCodexWorkerConfig("cheap")).toEqual({
+        model: "gpt-5.3-codex-spark",
+        modelReasoningEffort: "high"
+      });
+    } finally {
+      restoreEnv("CODEX_FLEET_CODEX_MODEL_CHEAP", previousModel);
+      restoreEnv("CODEX_FLEET_CODEX_REASONING_EFFORT_CHEAP", previousReasoning);
+    }
   });
 
   it("launches codex mcp-server without hook args by default", () => {

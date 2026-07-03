@@ -70,6 +70,12 @@ Do not set `CODEX_FLEET_CODEX_MODEL` by default. Let Codex use the operator's
 configured default model unless a worker model is intentionally pinned for a
 specific experiment.
 
+Use per-tier overrides when Fleet should steer one tier without pinning every
+worker. By default, Fleet maps `cheap` workers to `gpt-5.4-mini` with `medium`
+reasoning, while `standard` and `strong` inherit the operator's Codex defaults.
+Override with variables such as `CODEX_FLEET_CODEX_MODEL_CHEAP` and
+`CODEX_FLEET_CODEX_REASONING_EFFORT_CHEAP` when testing a different route.
+
 Add or complete practical service commands:
 
 ```sh

@@ -186,6 +186,10 @@ MCP Tool / CLI / TUI -> callDaemon -> TCP/Unix socket -> rpc/server.ts -> servic
   - `modelRouting` computes `requestedModel`, `defaultModelTier`, `actualModel`, `availableModelTiersFromEnv`.
   - Enforces minimum tier from `risk` + delivery mode and raises conflict when no eligible tier exists.
   - Emits `model_routing` when requested tier is unavailable and fallback used.
+- Codex worker launch config in [packages/daemon/src/workers/codex-backend.ts](../packages/daemon/src/workers/codex-backend.ts):
+  - maps the `cheap` tier to `gpt-5.4-mini` with `medium` reasoning by default;
+  - leaves `standard` and `strong` on the operator's configured Codex defaults unless overridden;
+  - accepts per-tier env overrides such as `CODEX_FLEET_CODEX_MODEL_CHEAP` and `CODEX_FLEET_CODEX_REASONING_EFFORT_CHEAP`.
 - Env var `CODEX_FLEET_AVAILABLE_MODEL_TIERS` drives available set.
 - Coverage: [test/integration/model-routing.test.ts](../test/integration/model-routing.test.ts)
 

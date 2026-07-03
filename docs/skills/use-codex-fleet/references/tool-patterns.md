@@ -51,7 +51,19 @@ Repo merge policies:
 - `agent_merge_explicit`: merge only when the task prompt explicitly instructs that PR to be merged.
 - `agent_merge_allowed`: merge when delivery mode, prompt, repo rules, and checks allow it.
 
-## Typical Repo Delegation
+## Typical Repo Research Delegation
+
+```json
+{
+  "target": { "repo": "thoughts" },
+  "deliveryMode": "research_only",
+  "risk": "low",
+  "modelTier": "cheap",
+  "prompt": "Treat CLAUDE.md the same as AGENTS.md. Read repo guidance first. Work in Fleet-owned task resources only. Inspect the requested area and report concise findings with exact paths and commands."
+}
+```
+
+## Typical Repo PR Delegation
 
 ```json
 {
