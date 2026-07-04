@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { resolveFleetPaths } from "../../packages/daemon/src/paths.js";
+import { RepoRegistry } from "../../packages/daemon/src/registry/repo-registry.js";
 import { createClient } from "../../packages/daemon/src/rpc/auth.js";
 import { callDaemon } from "../../packages/daemon/src/rpc/client.js";
 import { startDaemon } from "../../packages/daemon/src/rpc/server.js";
@@ -82,6 +83,131 @@ describe("repo registry and worktree isolation", () => {
       expect(existsSync(firstTask.task.worktreePath ?? "")).toBe(true);
       expect(existsSync(secondTask.task.worktreePath ?? "")).toBe(true);
       expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("# fixture\n");
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("imports GitHub repository catalogs and overlays native Fleet repo settings", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-github-catalog-"));
+    const paths = resolveFleetPaths(join(root, "fleet"));
+    mkdirSync(paths.rootDir, { recursive: true });
+    writeFileSync(
+      join(root, "repositories.json"),
+      `${JSON.stringify({
+        owner: "grubbyhacker",
+        repositories: [
+          {
+            name: "vps-ops",
+            archived: false,
+            branch_protection: {
+              enabled: true,
+              pattern: "main"
+            },
+            rulesets: {
+              default_branch: {
+                enabled: false
+              }
+            }
+          },
+          {
+            name: "signal-plane",
+            archived: false,
+            branch_protection: {
+              enabled: false
+            },
+            rulesets: {
+              default_branch: {
+                enabled: false
+              }
+            }
+          },
+          {
+            name: "ykmcorpus-staging",
+            archived: false,
+            branch_protection: {
+              enabled: false
+            },
+            rulesets: {
+              default_branch: {
+                enabled: true
+              }
+            }
+          },
+          {
+            name: "retired",
+            archived: true,
+            branch_protection: {
+              enabled: true,
+              pattern: "main"
+            }
+          }
+        ]
+      })}\n`
+    );
+    writeFileSync(
+      paths.reposPath,
+      `${JSON.stringify({
+        githubRepositoryCatalogs: [
+          {
+            path: "../repositories.json",
+            defaultModelTier: "strong"
+          }
+        ],
+        repos: [
+          {
+            alias: "vps-ops",
+            verifyCommands: ["mise run required"]
+          },
+          {
+            alias: "codex-fleet",
+            remoteUrl: "git@github.com:grubbyhacker/codex-fleet.git",
+            branchProtected: true,
+            defaultModelTier: "strong"
+          }
+        ]
+      })}\n`
+    );
+
+    const registry = RepoRegistry.load(paths);
+    const daemon = await startDaemon(paths);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const targets = (await callDaemon(rpc, "list_targets", {})) as {
+        targets: Array<{
+          id: string;
+          branchProtected?: boolean;
+          defaultModelTier?: string;
+          verifyCommands?: string[];
+        }>;
+      };
+
+      expect(targets.targets.map((target) => target.id)).toEqual([
+        "shell",
+        "vps-ops",
+        "signal-plane",
+        "ykmcorpus-staging",
+        "codex-fleet"
+      ]);
+      expect(targets.targets.find((target) => target.id === "retired")).toBeUndefined();
+      expect(targets.targets.find((target) => target.id === "vps-ops")).toMatchObject({
+        branchProtected: true,
+        defaultModelTier: "strong",
+        verifyCommands: ["mise run required"]
+      });
+      expect(targets.targets.find((target) => target.id === "signal-plane")).toMatchObject({
+        branchProtected: false,
+        defaultModelTier: "strong"
+      });
+      expect(
+        targets.targets.find((target) => target.id === "ykmcorpus-staging")?.branchProtected
+      ).toBe(true);
+      expect(registry.get("signal-plane")?.remoteUrl).toBe(
+        "git@github.com:grubbyhacker/signal-plane.git"
+      );
     } finally {
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });

@@ -7,6 +7,7 @@ export { resolveFleetPaths } from "./paths.js";
 export { clientRoleSchema, createClient, readClientToken } from "./rpc/auth.js";
 export { callDaemon } from "./rpc/client.js";
 export { resolveGitExecutable } from "./git.js";
+export { RepoRegistry } from "./registry/repo-registry.js";
 export { startDaemon } from "./rpc/server.js";
 
 export function daemonProbe(): { ok: true; knownTaskStates: string[] } {

@@ -194,6 +194,31 @@ Repo targets live in `~/.codex-fleet/repos.json`:
 }
 ```
 
+Repo targets can also be imported from a GitHub repository catalog such as the
+VPS ops OpenTofu catalog, with native Fleet entries used for overrides:
+
+```json
+{
+  "githubRepositoryCatalogs": [
+    {
+      "path": "/Users/roger/src/agent-infra/vps-ops/config/github/repositories.json",
+      "defaultModelTier": "strong"
+    }
+  ],
+  "repos": [
+    {
+      "alias": "vps-ops",
+      "verifyCommands": ["mise run required"]
+    }
+  ]
+}
+```
+
+Imported catalog repos use the GitHub repository name as the Fleet alias and an
+SSH remote URL rendered as `git@github.com:{owner}/{name}.git` by default.
+Archived catalog repos are skipped unless the catalog import sets
+`includeArchived` to `true`.
+
 For each repo task, Fleet manages:
 
 - a bare mirror under `~/.codex-fleet/repos/<alias>.git`;
