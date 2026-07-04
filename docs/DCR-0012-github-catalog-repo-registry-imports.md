@@ -31,6 +31,10 @@ Native `repos` entries remain supported and overlay imported entries by alias.
 That keeps Fleet-specific settings local while making the VPS ops GitHub catalog
 the source for repository presence.
 
+Catalog paths may use `~`, `$NAME`, and `${NAME}` expansion. Machine-specific
+workspace locations should live in environment configuration rather than being
+hard-coded in committed examples or reusable registry templates.
+
 ## Consequences
 
 - A repository tracked by VPS ops can appear in Fleet without duplicate native

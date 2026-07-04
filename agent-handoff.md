@@ -422,6 +422,7 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 - Added `DCR-0012` for importing GitHub repository catalogs into the Fleet repo registry.
 - Implemented `githubRepositoryCatalogs` in `~/.codex-fleet/repos.json`: catalog repos become Fleet targets, native entries overlay Fleet-specific verify/model settings, and archived repos are skipped by default.
 - Switched CLI cleanup repo source resolution to the shared registry loader so imported targets behave like native targets.
-- Updated live `~/.codex-fleet/repos.json` to import `/Users/roger/src/agent-infra/vps-ops/config/github/repositories.json` and keep explicit overrides for verify commands plus non-VPS repos.
+- Updated live `~/.codex-fleet/repos.json` to import `${CODEX_FLEET_AGENT_INFRA_ROOT}/vps-ops/config/github/repositories.json` and keep explicit overrides for verify commands plus non-VPS repos.
+- Persisted `CODEX_FLEET_AGENT_INFRA_ROOT=/Users/roger/src/agent-infra` in the local LaunchAgent environment.
 - Rebuilt/installed binaries, restarted the LaunchAgent daemon, and verified live `list_targets` includes VPS ops catalog repos such as `signal-plane` and `ykmcorpus-staging`.
 - Verified aggregate `mise exec -- bun run check`.

@@ -201,7 +201,7 @@ VPS ops OpenTofu catalog, with native Fleet entries used for overrides:
 {
   "githubRepositoryCatalogs": [
     {
-      "path": "/Users/roger/src/agent-infra/vps-ops/config/github/repositories.json",
+      "path": "${CODEX_FLEET_AGENT_INFRA_ROOT}/vps-ops/config/github/repositories.json",
       "defaultModelTier": "strong"
     }
   ],
@@ -217,7 +217,9 @@ VPS ops OpenTofu catalog, with native Fleet entries used for overrides:
 Imported catalog repos use the GitHub repository name as the Fleet alias and an
 SSH remote URL rendered as `git@github.com:{owner}/{name}.git` by default.
 Archived catalog repos are skipped unless the catalog import sets
-`includeArchived` to `true`.
+`includeArchived` to `true`. Catalog paths support `~`, `$NAME`, and `${NAME}`
+expansion, so machine-specific workspace locations can stay in environment
+configuration instead of the registry file.
 
 For each repo task, Fleet manages:
 

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 
 import {
@@ -148,7 +149,7 @@ function loadGithubRepositoryCatalog(
   registryDir: string,
   catalog: GithubRepositoryCatalog
 ): RepoConfigOverride[] {
-  const path = isAbsolute(catalog.path) ? catalog.path : join(registryDir, catalog.path);
+  const path = resolveConfiguredPath(registryDir, catalog.path);
   const parsed = githubCatalogFileSchema.parse(JSON.parse(readFileSync(path, "utf8")));
   return parsed.repositories
     .filter((repo) => catalog.includeArchived || !repo.archived)
@@ -183,6 +184,26 @@ function isProtected(repo: {
 
 function renderRemoteUrl(template: string, owner: string, name: string): string {
   return template.replaceAll("{owner}", owner).replaceAll("{name}", name);
+}
+
+function resolveConfiguredPath(registryDir: string, path: string): string {
+  const expanded = expandConfigPath(path);
+  return isAbsolute(expanded) ? expanded : join(registryDir, expanded);
+}
+
+function expandConfigPath(path: string): string {
+  const homeExpanded = path === "~" ? homedir() : path.replace(/^~\//, `${homedir()}/`);
+  return homeExpanded.replaceAll(
+    /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g,
+    (token, bracedName: string | undefined, bareName: string | undefined) => {
+      const name = bracedName ?? bareName;
+      const value = name ? process.env[name] : undefined;
+      if (!value) {
+        throw new Error(`Repo registry path "${path}" references unset environment ${token}`);
+      }
+      return value;
+    }
+  );
 }
 
 function addRepo(

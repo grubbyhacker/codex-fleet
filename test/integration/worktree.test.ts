@@ -92,6 +92,8 @@ describe("repo registry and worktree isolation", () => {
   it("imports GitHub repository catalogs and overlays native Fleet repo settings", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-github-catalog-"));
     const paths = resolveFleetPaths(join(root, "fleet"));
+    const previousCatalogRoot = process.env.CODEX_FLEET_TEST_CATALOG_ROOT;
+    process.env.CODEX_FLEET_TEST_CATALOG_ROOT = root;
     mkdirSync(paths.rootDir, { recursive: true });
     writeFileSync(
       join(root, "repositories.json"),
@@ -151,7 +153,7 @@ describe("repo registry and worktree isolation", () => {
       `${JSON.stringify({
         githubRepositoryCatalogs: [
           {
-            path: "../repositories.json",
+            path: "${CODEX_FLEET_TEST_CATALOG_ROOT}/repositories.json",
             defaultModelTier: "strong"
           }
         ],
@@ -209,6 +211,7 @@ describe("repo registry and worktree isolation", () => {
         "git@github.com:grubbyhacker/signal-plane.git"
       );
     } finally {
+      restoreEnv("CODEX_FLEET_TEST_CATALOG_ROOT", previousCatalogRoot);
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });
     }

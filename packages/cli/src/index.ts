@@ -461,7 +461,8 @@ function launchAgentEnvironment(): Array<[string, string]> {
     "CODEX_FLEET_CODEX_MODEL",
     "CODEX_FLEET_CODEX_COMMAND",
     "CODEX_FLEET_CODEX_TIMEOUT_MS",
-    "CODEX_FLEET_AVAILABLE_MODEL_TIERS"
+    "CODEX_FLEET_AVAILABLE_MODEL_TIERS",
+    "CODEX_FLEET_AGENT_INFRA_ROOT"
   ].flatMap((key) => {
     const value = defaults.get(key);
     return value ? [[key, value]] : [];
