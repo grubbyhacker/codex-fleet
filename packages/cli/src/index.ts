@@ -3,13 +3,14 @@ import {
   clientRoleSchema,
   createClient,
   readClientToken,
+  RepoRegistry,
   resolveGitExecutable,
   resolveFleetPaths,
   startDaemon
 } from "@codex-fleet/daemon";
 import type { TaskSnapshot } from "@codex-fleet/shared";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -341,15 +342,7 @@ function loadRepoOwnerPath(
   paths: ReturnType<typeof resolveFleetPaths>,
   alias: string
 ): { baseCheckout: string } {
-  const registry = JSON.parse(readFileSync(paths.reposPath, "utf8")) as {
-    repos?: Array<{
-      alias: string;
-      baseCheckout?: string;
-      mirrorPath?: string;
-      remoteUrl?: string;
-    }>;
-  };
-  const repo = registry.repos?.find((entry) => entry.alias === alias);
+  const repo = RepoRegistry.load(paths).get(alias);
   if (!repo) {
     throw new Error(`Unknown repo target "${alias}" in ${paths.reposPath}`);
   }
@@ -468,7 +461,8 @@ function launchAgentEnvironment(): Array<[string, string]> {
     "CODEX_FLEET_CODEX_MODEL",
     "CODEX_FLEET_CODEX_COMMAND",
     "CODEX_FLEET_CODEX_TIMEOUT_MS",
-    "CODEX_FLEET_AVAILABLE_MODEL_TIERS"
+    "CODEX_FLEET_AVAILABLE_MODEL_TIERS",
+    "CODEX_FLEET_AGENT_INFRA_ROOT"
   ].flatMap((key) => {
     const value = defaults.get(key);
     return value ? [[key, value]] : [];

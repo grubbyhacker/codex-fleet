@@ -120,7 +120,9 @@ describe("cli views", () => {
   it("prints a macOS LaunchAgent plist", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-cli-service-"));
     const previousModel = process.env.CODEX_FLEET_CODEX_MODEL;
+    const previousAgentInfraRoot = process.env.CODEX_FLEET_AGENT_INFRA_ROOT;
     delete process.env.CODEX_FLEET_CODEX_MODEL;
+    process.env.CODEX_FLEET_AGENT_INFRA_ROOT = join(root, "agent-infra");
     try {
       const plist = await runCli(root, "service", "launch-agent", "print");
       expect(plist).toContain("dev.codex-fleet.daemon");
@@ -135,9 +137,12 @@ describe("cli views", () => {
       expect(plist).toContain("CODEX_FLEET_CODEX_COMMAND");
       expect(plist).not.toContain("CODEX_FLEET_CODEX_MODEL");
       expect(plist).not.toContain("gpt-5.3-codex-spark");
+      expect(plist).toContain("CODEX_FLEET_AGENT_INFRA_ROOT");
+      expect(plist).toContain(join(root, "agent-infra"));
       expect(plist).toContain(root);
     } finally {
       restoreEnv("CODEX_FLEET_CODEX_MODEL", previousModel);
+      restoreEnv("CODEX_FLEET_AGENT_INFRA_ROOT", previousAgentInfraRoot);
       rmSync(root, { force: true, recursive: true });
     }
   });
