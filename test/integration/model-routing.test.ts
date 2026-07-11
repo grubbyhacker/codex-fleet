@@ -10,7 +10,7 @@ import { callDaemon } from "../../packages/daemon/src/rpc/client.js";
 import { startDaemon } from "../../packages/daemon/src/rpc/server.js";
 
 describe("model tier routing", () => {
-  it("records concrete worker model settings for cheap tier tasks", async () => {
+  it("records concrete worker model and route settings for default tasks", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-model-worker-"));
     const paths = resolveFleetPaths(root);
     const daemon = await startDaemon(paths);
@@ -29,6 +29,8 @@ describe("model tier routing", () => {
         task: {
           requestedModel?: string;
           actualModel?: string;
+          requestedModelRoute?: string;
+          actualModelRoute?: string;
           workerModel?: string;
           workerReasoningEffort?: string;
         };
@@ -36,9 +38,89 @@ describe("model tier routing", () => {
 
       expect(result.task.requestedModel).toBe("cheap");
       expect(result.task.actualModel).toBe("cheap");
-      expect(result.task.workerModel).toBe("gpt-5.4-mini");
+      expect(result.task.requestedModelRoute).toBeUndefined();
+      expect(result.task.actualModelRoute).toBe("fleet-default");
+      expect(result.task.workerModel).toBe("gpt-5.5");
       expect(result.task.workerReasoningEffort).toBe("medium");
     } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("records explicit GPT-5.6 route choices from orchestrators", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-model-route-"));
+    const paths = resolveFleetPaths(root);
+    const daemon = await startDaemon(paths);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        risk: "standard",
+        modelTier: "standard",
+        modelRoute: "gpt-5.6-sol",
+        prompt: "sol research"
+      })) as { taskId: string };
+      const result = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
+        task: {
+          requestedModelRoute?: string;
+          actualModelRoute?: string;
+          workerModel?: string;
+        };
+      };
+
+      expect(result.task.requestedModelRoute).toBe("gpt-5.6-sol");
+      expect(result.task.actualModelRoute).toBe("gpt-5.6-sol");
+      expect(result.task.workerModel).toBe("gpt-5.6-sol");
+
+      const history = (await callDaemon(rpc, "get_task_history", {
+        taskId: delegated.taskId
+      })) as { events: Array<{ type: string; summary: string }> };
+      expect(history.events).toContainEqual(
+        expect.objectContaining({
+          type: "model_route",
+          summary: expect.stringContaining("gpt-5.6-sol")
+        })
+      );
+    } finally {
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("falls back and records actual route when a requested route is unavailable", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-model-route-fallback-"));
+    const previousAvailable = process.env.CODEX_FLEET_AVAILABLE_MODEL_ROUTES;
+    process.env.CODEX_FLEET_AVAILABLE_MODEL_ROUTES = "fleet-default,gpt-5.5,gpt-5.6-luna";
+    const paths = resolveFleetPaths(root);
+    const daemon = await startDaemon(paths);
+    const client = createClient(paths, "orch", "orchestrator");
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        risk: "standard",
+        modelRoute: "gpt-5.6-sol",
+        prompt: "sol unavailable"
+      })) as { taskId: string };
+      const result = (await callDaemon(rpc, "get_task", { taskId: delegated.taskId })) as {
+        task: {
+          requestedModelRoute?: string;
+          actualModelRoute?: string;
+          workerModel?: string;
+        };
+      };
+
+      expect(result.task.requestedModelRoute).toBe("gpt-5.6-sol");
+      expect(result.task.actualModelRoute).toBe("fleet-default");
+      expect(result.task.workerModel).toBe("gpt-5.5");
+    } finally {
+      restoreAvailableModelRoutes(previousAvailable);
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });
     }
@@ -142,5 +224,13 @@ function restoreAvailableModelTiers(previous: string | undefined): void {
     delete process.env.CODEX_FLEET_AVAILABLE_MODEL_TIERS;
   } else {
     process.env.CODEX_FLEET_AVAILABLE_MODEL_TIERS = previous;
+  }
+}
+
+function restoreAvailableModelRoutes(previous: string | undefined): void {
+  if (previous === undefined) {
+    delete process.env.CODEX_FLEET_AVAILABLE_MODEL_ROUTES;
+  } else {
+    process.env.CODEX_FLEET_AVAILABLE_MODEL_ROUTES = previous;
   }
 }

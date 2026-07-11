@@ -66,14 +66,14 @@ CODEX_FLEET_WORKER_BACKEND=codex
 CODEX_FLEET_CODEX_COMMAND=/Applications/Codex.app/Contents/Resources/codex
 ```
 
-Do not set `CODEX_FLEET_CODEX_MODEL` by default. Let Codex use the operator's
-configured default model unless a worker model is intentionally pinned for a
-specific experiment.
+Do not set `CODEX_FLEET_CODEX_MODEL` by default. Fleet's default model route is
+`fleet-default`, currently `gpt-5.5`. Use explicit `modelRoute` values when a
+worker should leave the default route for `gpt-5.6-luna`, `gpt-5.6-terra`, or
+`gpt-5.6-sol`.
 
-Use per-tier overrides when Fleet should steer one tier without pinning every
-worker. By default, Fleet maps `cheap` workers to `gpt-5.4-mini` with `medium`
-reasoning, while `standard` and `strong` inherit the operator's Codex defaults.
-Override with variables such as `CODEX_FLEET_CODEX_MODEL_CHEAP` and
+Use per-route or per-tier overrides only for experiments. Override with
+variables such as `CODEX_FLEET_CODEX_MODEL_ROUTE_GPT_5_6_TERRA`,
+`CODEX_FLEET_CODEX_MODEL_CHEAP`, and
 `CODEX_FLEET_CODEX_REASONING_EFFORT_CHEAP` when testing a different route.
 
 Add or complete practical service commands:

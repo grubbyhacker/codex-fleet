@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import {
   mergePolicySchema,
   modelTierSchema,
+  type ModelRoute,
   type MergePolicy,
   type TargetDescriptor
 } from "@codex-fleet/shared";
@@ -122,13 +123,15 @@ export class RepoRegistry {
     return new RepoRegistry([...repos.values()].map((repo) => repoConfigSchema.parse(repo)));
   }
 
-  listDescriptors(): TargetDescriptor[] {
+  listDescriptors(availableModelRoutes: ModelRoute[]): TargetDescriptor[] {
     return this.repos.map((repo) => ({
       id: repo.alias,
       target: { repo: repo.alias },
       title: repo.alias,
       defaultModelTier: repo.defaultModelTier,
       availableModelTiers: ["cheap", "standard", "strong"],
+      defaultModelRoute: "fleet-default",
+      availableModelRoutes,
       verifyCommands: repo.verifyCommands,
       defaultBranch: repo.defaultBranch,
       branchProtected: repo.branchProtected,

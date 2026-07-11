@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import type { Stream } from "node:stream";
 
-import type { ModelTier } from "@codex-fleet/shared";
+import type { ModelRoute, ModelTier } from "@codex-fleet/shared";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { NotificationSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -133,7 +133,7 @@ export function resolveCodexCommand(candidates = defaultCodexCommandCandidates()
 }
 
 export function codexWorkerToolArguments(input: WorkerInput, cwd: string): Record<string, unknown> {
-  const workerConfig = resolveCodexWorkerConfig(input.actualModelTier);
+  const workerConfig = resolveCodexWorkerConfig(input.actualModelTier, input.actualModelRoute);
   return stripUndefined({
     prompt: input.request.prompt,
     cwd,
@@ -159,20 +159,24 @@ export function codexWorkerCommandArgs(input: WorkerInput): string[] {
     );
   }
 
-  const workerConfig = resolveCodexWorkerConfig(input.actualModelTier);
+  const workerConfig = resolveCodexWorkerConfig(input.actualModelTier, input.actualModelRoute);
   if (workerConfig.modelReasoningEffort) {
     args.push("-c", `model_reasoning_effort=${JSON.stringify(workerConfig.modelReasoningEffort)}`);
   }
   return args;
 }
 
-export function resolveCodexWorkerConfig(tier: ModelTier | undefined): CodexWorkerConfig {
+export function resolveCodexWorkerConfig(
+  tier: ModelTier | undefined,
+  route: ModelRoute | undefined = "fleet-default"
+): CodexWorkerConfig {
   return stripUndefined({
     model: firstConfigured([
       process.env.CODEX_FLEET_CODEX_MODEL,
       process.env.CODEX_FLEET_E2E_MODEL,
+      route ? process.env[`CODEX_FLEET_CODEX_MODEL_ROUTE_${envRouteSuffix(route)}`] : undefined,
       tier ? process.env[`CODEX_FLEET_CODEX_MODEL_${envTierSuffix(tier)}`] : undefined,
-      defaultCodexModelForTier(tier)
+      defaultCodexModelForRoute(route)
     ]),
     modelReasoningEffort: firstConfigured([
       process.env.CODEX_FLEET_CODEX_REASONING_EFFORT,
@@ -183,8 +187,20 @@ export function resolveCodexWorkerConfig(tier: ModelTier | undefined): CodexWork
   });
 }
 
-function defaultCodexModelForTier(tier: ModelTier | undefined): string | undefined {
-  return tier === "cheap" ? "gpt-5.4-mini" : undefined;
+function defaultCodexModelForRoute(route: ModelRoute | undefined): string | undefined {
+  switch (route) {
+    case "fleet-default":
+    case "gpt-5.5":
+      return "gpt-5.5";
+    case "gpt-5.6-luna":
+      return "gpt-5.6-luna";
+    case "gpt-5.6-terra":
+      return "gpt-5.6-terra";
+    case "gpt-5.6-sol":
+      return "gpt-5.6-sol";
+    case undefined:
+      return undefined;
+  }
 }
 
 function defaultCodexReasoningEffortForTier(tier: ModelTier | undefined): string | undefined {
@@ -193,6 +209,10 @@ function defaultCodexReasoningEffortForTier(tier: ModelTier | undefined): string
 
 function envTierSuffix(tier: ModelTier): string {
   return tier.toUpperCase();
+}
+
+function envRouteSuffix(route: ModelRoute): string {
+  return route.toUpperCase().replaceAll(/[^A-Z0-9]+/g, "_");
 }
 
 function firstConfigured(values: Array<string | undefined>): string | undefined {
