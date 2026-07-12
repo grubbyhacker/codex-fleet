@@ -29,6 +29,15 @@ export type Risk = z.infer<typeof riskSchema>;
 export const modelTierSchema = z.enum(["cheap", "standard", "strong"]);
 export type ModelTier = z.infer<typeof modelTierSchema>;
 
+export const modelRouteSchema = z.enum([
+  "fleet-default",
+  "gpt-5.5",
+  "gpt-5.6-luna",
+  "gpt-5.6-terra",
+  "gpt-5.6-sol"
+]);
+export type ModelRoute = z.infer<typeof modelRouteSchema>;
+
 export const mergePolicySchema = z.enum([
   "human_review",
   "agent_merge_explicit",
@@ -64,6 +73,8 @@ export const targetDescriptorSchema = z.object({
   title: z.string().min(1),
   defaultModelTier: modelTierSchema,
   availableModelTiers: z.array(modelTierSchema).min(1),
+  defaultModelRoute: modelRouteSchema,
+  availableModelRoutes: z.array(modelRouteSchema).min(1),
   verifyCommands: z.array(z.string().min(1)).optional(),
   defaultBranch: z.string().min(1).optional(),
   branchProtected: z.boolean().optional(),
@@ -85,9 +96,22 @@ export type OwnerSession = z.infer<typeof ownerSessionSchema>;
 export const delegateTaskRequestSchema = z.object({
   target: targetSchema,
   deliveryMode: deliveryModeSchema,
-  risk: riskSchema.default("standard"),
+  risk: riskSchema
+    .describe(
+      "Risk hint for Fleet safety policy: low for read-only/simple work, standard for normal repo work, high for security-sensitive, production, ambiguous, or high-blast-radius work."
+    )
+    .default("standard"),
   resumeTaskId: z.string().min(1).optional(),
-  modelTier: modelTierSchema.optional(),
+  modelTier: modelTierSchema
+    .describe(
+      "Capability/cost tier hint. Use cheap for smoke tests, codebase exploration, read-heavy scans, simple read-only checks, and tiny mechanical work; standard for normal repo tasks and implementation slices; strong for high-risk changes, ambiguous architecture, security-sensitive work, or work likely to require deep judgment."
+    )
+    .optional(),
+  modelRoute: modelRouteSchema
+    .describe(
+      "Optional concrete model route. Omit for Fleet's default route, currently gpt-5.6-terra. Use gpt-5.5 for conservative fallback, gpt-5.6-luna for fastest/lowest-cost GPT-5.6 work, and gpt-5.6-sol only for the hardest long-horizon, ambiguous, security-sensitive, or high-consequence work. Fleet records requestedModelRoute, actualModelRoute, and workerModel for audit."
+    )
+    .optional(),
   prompt: z.string().min(1)
 });
 export type DelegateTaskRequest = z.infer<typeof delegateTaskRequestSchema>;
@@ -124,6 +148,8 @@ export const taskSnapshotSchema = z.object({
   lastActivityAt: z.string().min(1).optional(),
   requestedModel: modelTierSchema.optional(),
   actualModel: modelTierSchema.optional(),
+  requestedModelRoute: modelRouteSchema.optional(),
+  actualModelRoute: modelRouteSchema.optional(),
   workerModel: z.string().min(1).optional(),
   workerReasoningEffort: z.string().min(1).optional(),
   codexThreadId: z.string().min(1).optional()

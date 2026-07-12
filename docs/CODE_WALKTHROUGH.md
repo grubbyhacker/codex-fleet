@@ -184,13 +184,16 @@ MCP Tool / CLI / TUI -> callDaemon -> TCP/Unix socket -> rpc/server.ts -> servic
 
 - Routing logic in [packages/daemon/src/service.ts](../packages/daemon/src/service.ts):
   - `modelRouting` computes `requestedModel`, `defaultModelTier`, `actualModel`, `availableModelTiersFromEnv`.
+  - `routeModelRoute` computes `requestedModelRoute`, `actualModelRoute`, and `availableModelRoutes`.
   - Enforces minimum tier from `risk` + delivery mode and raises conflict when no eligible tier exists.
   - Emits `model_routing` when requested tier is unavailable and fallback used.
+  - Emits `model_route` when an orchestrator explicitly requests a route such as `gpt-5.6-sol`.
 - Codex worker launch config in [packages/daemon/src/workers/codex-backend.ts](../packages/daemon/src/workers/codex-backend.ts):
-  - maps the `cheap` tier to `gpt-5.4-mini` with `medium` reasoning by default;
-  - leaves `standard` and `strong` on the operator's configured Codex defaults unless overridden;
-  - accepts per-tier env overrides such as `CODEX_FLEET_CODEX_MODEL_CHEAP` and `CODEX_FLEET_CODEX_REASONING_EFFORT_CHEAP`.
+  - maps the default route to `gpt-5.6-terra`;
+  - maps explicit GPT-5.6 routes to `gpt-5.6-luna`, `gpt-5.6-terra`, or `gpt-5.6-sol`;
+  - accepts per-route and per-tier env overrides such as `CODEX_FLEET_CODEX_MODEL_ROUTE_GPT_5_6_TERRA`, `CODEX_FLEET_CODEX_MODEL_CHEAP`, and `CODEX_FLEET_CODEX_REASONING_EFFORT_CHEAP`.
 - Env var `CODEX_FLEET_AVAILABLE_MODEL_TIERS` drives available set.
+- Env var `CODEX_FLEET_AVAILABLE_MODEL_ROUTES` drives available concrete route set.
 - Coverage: [test/integration/model-routing.test.ts](../test/integration/model-routing.test.ts)
 
 ## 9) Cleanup and resource release

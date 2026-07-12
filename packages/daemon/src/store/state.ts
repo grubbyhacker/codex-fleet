@@ -14,6 +14,7 @@ export type TaskCreatedPayload = Omit<DelegateTaskRequest, "prompt"> & {
   prompt?: string;
   promptPreview: string;
   actualModel: TaskSnapshot["actualModel"];
+  actualModelRoute: TaskSnapshot["actualModelRoute"];
   workerModel?: TaskSnapshot["workerModel"];
   workerReasoningEffort?: TaskSnapshot["workerReasoningEffort"];
 };
@@ -25,6 +26,8 @@ export type TaskResumedPayload = {
   risk: TaskSnapshot["risk"];
   requestedModel?: TaskSnapshot["requestedModel"];
   actualModel?: TaskSnapshot["actualModel"];
+  requestedModelRoute?: TaskSnapshot["requestedModelRoute"];
+  actualModelRoute?: TaskSnapshot["actualModelRoute"];
   workerModel?: TaskSnapshot["workerModel"];
   workerReasoningEffort?: TaskSnapshot["workerReasoningEffort"];
 };
@@ -85,6 +88,8 @@ export class FleetState {
           promptPreview: payload.promptPreview,
           requestedModel: payload.modelTier,
           actualModel: payload.actualModel,
+          requestedModelRoute: payload.modelRoute,
+          actualModelRoute: payload.actualModelRoute,
           workerModel: payload.workerModel,
           workerReasoningEffort: payload.workerReasoningEffort
         })
@@ -108,6 +113,8 @@ export class FleetState {
         promptPreview: payload.promptPreview,
         requestedModel: payload.requestedModel,
         actualModel: payload.actualModel ?? existing.actualModel,
+        requestedModelRoute: payload.requestedModelRoute,
+        actualModelRoute: payload.actualModelRoute ?? existing.actualModelRoute,
         workerModel: payload.workerModel ?? existing.workerModel,
         workerReasoningEffort: payload.workerReasoningEffort ?? existing.workerReasoningEffort
       });

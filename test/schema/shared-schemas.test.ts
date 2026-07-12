@@ -14,10 +14,12 @@ describe("shared schemas", () => {
     const parsed = delegateTaskRequestSchema.parse({
       target: { repo: "codex-fleet" },
       deliveryMode: "patch",
+      modelRoute: "gpt-5.6-terra",
       prompt: "Implement a small change"
     });
 
     expect(parsed.risk).toBe("standard");
+    expect(parsed.modelRoute).toBe("gpt-5.6-terra");
   });
 
   it("caps wait intervals to the design bound", () => {
@@ -66,6 +68,14 @@ describe("shared schemas", () => {
       title: "codex-fleet",
       defaultModelTier: "strong",
       availableModelTiers: ["cheap", "standard", "strong"],
+      defaultModelRoute: "fleet-default",
+      availableModelRoutes: [
+        "fleet-default",
+        "gpt-5.5",
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.6-sol"
+      ],
       mergePolicy: "human_review"
     });
 

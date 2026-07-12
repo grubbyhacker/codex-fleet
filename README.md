@@ -174,6 +174,22 @@ Public MCP tools:
 - `get_task_history`
 - `end_task`
 
+## Model Routing
+
+`modelTier` is a cost/capability hint: `cheap`, `standard`, or `strong`.
+`modelRoute` is optional concrete model selection. Omit `modelRoute` for
+Fleet's default route, currently `gpt-5.6-terra`. Use explicit routes only when
+the task justifies leaving that default:
+
+- `gpt-5.5` for conservative fallback to the previous default family.
+- `gpt-5.6-luna` for narrow, fast, lowest-cost GPT-5.6 work.
+- `gpt-5.6-sol` for the hardest long-horizon, ambiguous, security-sensitive, or
+  high-consequence work.
+
+Task snapshots record `requestedModelRoute`, `actualModelRoute`, and
+`workerModel` so operator review can detect whether orchestrators are
+over-selecting Sol.
+
 ## Configure Repo Targets
 
 Repo targets live in `~/.codex-fleet/repos.json`:

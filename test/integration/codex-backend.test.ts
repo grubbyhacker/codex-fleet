@@ -70,7 +70,7 @@ describe("codex worker backend", () => {
     });
   });
 
-  it("maps cheap workers to GPT-5.4 mini with medium reasoning", () => {
+  it("maps default workers to GPT-5.6 Terra while preserving cheap tier reasoning", () => {
     const input = {
       taskId: "task-cheap",
       actualModelTier: "cheap" as const,
@@ -84,11 +84,11 @@ describe("codex worker backend", () => {
     };
 
     expect(resolveCodexWorkerConfig("cheap")).toEqual({
-      model: "gpt-5.4-mini",
+      model: "gpt-5.6-terra",
       modelReasoningEffort: "medium"
     });
     expect(codexWorkerToolArguments(input, "/tmp/codex-fleet-worker")).toMatchObject({
-      model: "gpt-5.4-mini"
+      model: "gpt-5.6-terra"
     });
     expect(codexWorkerCommandArgs(input)).toEqual([
       "mcp-server",
@@ -97,9 +97,22 @@ describe("codex worker backend", () => {
     ]);
   });
 
-  it("lets standard and strong workers inherit the operator default model", () => {
-    expect(resolveCodexWorkerConfig("standard")).toEqual({});
-    expect(resolveCodexWorkerConfig("strong")).toEqual({});
+  it("maps explicit GPT-5.6 routes to concrete Codex model ids", () => {
+    expect(resolveCodexWorkerConfig("standard", "gpt-5.6-luna")).toMatchObject({
+      model: "gpt-5.6-luna"
+    });
+    expect(resolveCodexWorkerConfig("standard", "gpt-5.6-terra")).toMatchObject({
+      model: "gpt-5.6-terra"
+    });
+    expect(resolveCodexWorkerConfig("strong", "gpt-5.6-sol")).toMatchObject({
+      model: "gpt-5.6-sol"
+    });
+  });
+
+  it("keeps GPT-5.5 available as an explicit route", () => {
+    expect(resolveCodexWorkerConfig("standard", "gpt-5.5")).toMatchObject({
+      model: "gpt-5.5"
+    });
   });
 
   it("honors explicit worker model and reasoning overrides", () => {

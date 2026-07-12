@@ -15,6 +15,7 @@ import {
   type DeliveryMode,
   type DaemonMethod,
   type Event,
+  type ModelRoute,
   type ModelTier,
   type OwnerSession,
   type RpcEnvelope,
@@ -150,14 +151,17 @@ export class FleetService {
   }
 
   private listTargets(): TargetDescriptor[] {
+    const availableModelRoutes = availableModelRoutesFromEnv();
     const shellTarget: TargetDescriptor = {
       id: "shell",
       target: { shell: true },
       title: "Host shell",
       defaultModelTier: "standard",
-      availableModelTiers: ["cheap", "standard", "strong"]
+      availableModelTiers: ["cheap", "standard", "strong"],
+      defaultModelRoute: "fleet-default",
+      availableModelRoutes
     };
-    return [shellTarget].concat(this.registry.listDescriptors());
+    return [shellTarget].concat(this.registry.listDescriptors(availableModelRoutes));
   }
 
   private async delegateTask(
@@ -192,7 +196,11 @@ export class FleetService {
     }
 
     const modelRouting = routeModelTier(request, defaultModelTier);
-    const workerConfig = resolveCodexWorkerConfig(modelRouting.actualModel);
+    const routeRouting = routeModelRoute(request);
+    const workerConfig = resolveCodexWorkerConfig(
+      modelRouting.actualModel,
+      routeRouting.actualModelRoute
+    );
 
     if (repoForWorktree) {
       const source =
@@ -218,7 +226,9 @@ export class FleetService {
       risk: request.risk,
       resumeTaskId: request.resumeTaskId,
       modelTier: request.modelTier,
+      modelRoute: request.modelRoute,
       actualModel: modelRouting.actualModel,
+      actualModelRoute: routeRouting.actualModelRoute,
       workerModel: workerConfig.model,
       workerReasoningEffort: workerConfig.modelReasoningEffort,
       prompt: request.prompt,
@@ -231,6 +241,9 @@ export class FleetService {
       modelRouting.reason === "requested_unavailable_fallback"
     ) {
       this.append("model_routing", taskId, modelRouting);
+    }
+    if (routeRouting.requestedModelRoute || routeRouting.reason === "route_unavailable_fallback") {
+      this.append("model_route", taskId, routeRouting);
     }
     if (branch || worktreePath || shellPath) {
       this.append("task_resource", taskId, { branch, worktreePath, shellPath });
@@ -247,7 +260,8 @@ export class FleetService {
       worktreePath,
       shellPath,
       mergePolicy: repoForWorktree?.mergePolicy,
-      actualModelTier: modelRouting.actualModel
+      actualModelTier: modelRouting.actualModel,
+      actualModelRoute: routeRouting.actualModelRoute
     };
     void this.runWorker({
       ...workerInput,
@@ -272,7 +286,11 @@ export class FleetService {
     const now = new Date().toISOString();
     const repo = "repo" in task.target ? this.registry.get(task.target.repo) : undefined;
     const modelRouting = routeModelTier(request, repo?.defaultModelTier ?? "standard");
-    const workerConfig = resolveCodexWorkerConfig(modelRouting.actualModel);
+    const routeRouting = routeModelRoute(request);
+    const workerConfig = resolveCodexWorkerConfig(
+      modelRouting.actualModel,
+      routeRouting.actualModelRoute
+    );
     this.append("task_resumed", task.id, {
       prompt: request.prompt,
       promptPreview: preview(request.prompt),
@@ -280,6 +298,8 @@ export class FleetService {
       risk: request.risk,
       requestedModel: request.modelTier,
       actualModel: modelRouting.actualModel,
+      requestedModelRoute: request.modelRoute,
+      actualModelRoute: routeRouting.actualModelRoute,
       workerModel: workerConfig.model,
       workerReasoningEffort: workerConfig.modelReasoningEffort
     });
@@ -288,6 +308,9 @@ export class FleetService {
       modelRouting.reason === "requested_unavailable_fallback"
     ) {
       this.append("model_routing", task.id, modelRouting);
+    }
+    if (routeRouting.requestedModelRoute || routeRouting.reason === "route_unavailable_fallback") {
+      this.append("model_route", task.id, routeRouting);
     }
     this.append("task_state", task.id, {
       state: "running",
@@ -306,6 +329,7 @@ export class FleetService {
       shellPath: task.shellPath,
       mergePolicy: repo?.mergePolicy,
       actualModelTier: modelRouting.actualModel,
+      actualModelRoute: routeRouting.actualModelRoute,
       codexThreadId: task.codexThreadId
     };
     void this.runWorker({
@@ -375,9 +399,16 @@ export class FleetService {
             risk: currentInput.request.risk,
             requestedModel: currentInput.request.modelTier,
             actualModel: currentInput.actualModelTier,
-            workerModel: resolveCodexWorkerConfig(currentInput.actualModelTier).model,
-            workerReasoningEffort: resolveCodexWorkerConfig(currentInput.actualModelTier)
-              .modelReasoningEffort
+            requestedModelRoute: currentInput.request.modelRoute,
+            actualModelRoute: currentInput.actualModelRoute,
+            workerModel: resolveCodexWorkerConfig(
+              currentInput.actualModelTier,
+              currentInput.actualModelRoute
+            ).model,
+            workerReasoningEffort: resolveCodexWorkerConfig(
+              currentInput.actualModelTier,
+              currentInput.actualModelRoute
+            ).modelReasoningEffort
           });
           this.append("task_state", currentInput.taskId, {
             state: "running",
@@ -852,6 +883,48 @@ function routeModelTier(
     availableModelTiers,
     reason: modelRoutingReason(requestedModel, preferredTier, requiredTier, actualModel)
   };
+}
+
+function routeModelRoute(request: ReturnType<typeof delegateTaskRequestSchema.parse>): {
+  requestedModelRoute?: ModelRoute;
+  actualModelRoute: ModelRoute;
+  availableModelRoutes: ModelRoute[];
+  reason: "route_requested_available" | "route_default_selected" | "route_unavailable_fallback";
+} {
+  const availableModelRoutes = availableModelRoutesFromEnv();
+  const requestedModelRoute = request.modelRoute;
+  const preferredRoute = requestedModelRoute ?? "fleet-default";
+  const actualModelRoute = availableModelRoutes.includes(preferredRoute)
+    ? preferredRoute
+    : "fleet-default";
+  if (!availableModelRoutes.includes(actualModelRoute)) {
+    throw new FleetError(
+      "conflict",
+      `No available model route satisfies "${preferredRoute}"`,
+      "list_targets"
+    );
+  }
+
+  return {
+    requestedModelRoute,
+    actualModelRoute,
+    availableModelRoutes,
+    reason: !requestedModelRoute
+      ? "route_default_selected"
+      : actualModelRoute === requestedModelRoute
+        ? "route_requested_available"
+        : "route_unavailable_fallback"
+  };
+}
+
+function availableModelRoutesFromEnv(): ModelRoute[] {
+  const raw = process.env.CODEX_FLEET_AVAILABLE_MODEL_ROUTES;
+  const allowed = ["fleet-default", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"];
+  const parsed = raw
+    ?.split(",")
+    .map((route) => route.trim())
+    .filter((route): route is ModelRoute => allowed.includes(route));
+  return parsed && parsed.length > 0 ? parsed : (allowed as ModelRoute[]);
 }
 
 function modelRoutingReason(

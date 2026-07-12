@@ -87,11 +87,17 @@ Choose the target deliberately:
 
 Choose model tier by risk and complexity:
 
-- `cheap`: default choice for smoke tests, codebase exploration, read-heavy scans, simple read-only checks, and tiny mechanical work. Fleet routes this tier to a smaller worker model when allowed.
+- `cheap`: default choice for smoke tests, codebase exploration, read-heavy scans, simple read-only checks, and tiny mechanical work.
 - `standard`: normal repo tasks and implementation slices that need more judgment than a scan but are not high-risk.
 - `strong`: high-risk changes, ambiguous architecture, security-sensitive work, or work likely to require deep judgment.
 
-Fleet may upgrade the actual model tier for safety or availability. Check `requestedModel`, `actualModel`, `workerModel`, and `workerReasoningEffort` in task snapshots when model choice matters.
+Choose an explicit model route only when the task justifies leaving Fleet's default model. If `modelRoute` is omitted, Fleet uses its default route, currently `gpt-5.6-terra`.
+
+- `gpt-5.5`: conservative fallback to the previous default family.
+- `gpt-5.6-luna`: fastest/lowest-cost GPT-5.6 route for narrow, low-risk work where 5.6 behavior is useful.
+- `gpt-5.6-sol`: strongest GPT-5.6 route; reserve it for the hardest long-horizon, ambiguous, security-sensitive, or high-consequence work. Do not select Sol merely because it is available.
+
+Fleet may upgrade the actual model tier for safety or availability. It records concrete model choices for audit. Check `requestedModel`, `actualModel`, `requestedModelRoute`, `actualModelRoute`, `workerModel`, and `workerReasoningEffort` in task snapshots when model choice matters or when looking for Sol over-selection.
 
 ## Worker Prompts
 
