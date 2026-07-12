@@ -432,7 +432,7 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 ### Did
 
 - Added `DCR-0013` for explicit `modelRoute` selection alongside existing `modelTier`.
-- Kept Fleet default routing on `gpt-5.5` and added explicit routes for `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol`.
+- Set Fleet default routing to `gpt-5.6-terra` and kept explicit routes for `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol`.
 - Persisted `requestedModelRoute`, `actualModelRoute`, and `workerModel` so orchestrator Sol selection can be audited.
 - Updated MCP metadata and the Fleet skill guidance to reserve Sol for hard, high-consequence work.
 - Verified aggregate `mise exec -- bun run check` and a real Codex MCP smoke for `modelRoute: "gpt-5.6-luna"`.

@@ -109,7 +109,7 @@ export const delegateTaskRequestSchema = z.object({
     .optional(),
   modelRoute: modelRouteSchema
     .describe(
-      "Optional concrete model route. Omit for Fleet's default route, currently gpt-5.5. Use gpt-5.6-luna for fastest/lowest-cost GPT-5.6 work, gpt-5.6-terra for balanced GPT-5.6 work, and gpt-5.6-sol only for the hardest long-horizon, ambiguous, security-sensitive, or high-consequence work. Fleet records requestedModelRoute, actualModelRoute, and workerModel for audit."
+      "Optional concrete model route. Omit for Fleet's default route, currently gpt-5.6-terra. Use gpt-5.5 for conservative fallback, gpt-5.6-luna for fastest/lowest-cost GPT-5.6 work, and gpt-5.6-sol only for the hardest long-horizon, ambiguous, security-sensitive, or high-consequence work. Fleet records requestedModelRoute, actualModelRoute, and workerModel for audit."
     )
     .optional(),
   prompt: z.string().min(1)

@@ -189,7 +189,7 @@ MCP Tool / CLI / TUI -> callDaemon -> TCP/Unix socket -> rpc/server.ts -> servic
   - Emits `model_routing` when requested tier is unavailable and fallback used.
   - Emits `model_route` when an orchestrator explicitly requests a route such as `gpt-5.6-sol`.
 - Codex worker launch config in [packages/daemon/src/workers/codex-backend.ts](../packages/daemon/src/workers/codex-backend.ts):
-  - maps the default route to `gpt-5.5`;
+  - maps the default route to `gpt-5.6-terra`;
   - maps explicit GPT-5.6 routes to `gpt-5.6-luna`, `gpt-5.6-terra`, or `gpt-5.6-sol`;
   - accepts per-route and per-tier env overrides such as `CODEX_FLEET_CODEX_MODEL_ROUTE_GPT_5_6_TERRA`, `CODEX_FLEET_CODEX_MODEL_CHEAP`, and `CODEX_FLEET_CODEX_REASONING_EFFORT_CHEAP`.
 - Env var `CODEX_FLEET_AVAILABLE_MODEL_TIERS` drives available set.

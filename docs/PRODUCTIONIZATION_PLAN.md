@@ -67,8 +67,8 @@ CODEX_FLEET_CODEX_COMMAND=/Applications/Codex.app/Contents/Resources/codex
 ```
 
 Do not set `CODEX_FLEET_CODEX_MODEL` by default. Fleet's default model route is
-`fleet-default`, currently `gpt-5.5`. Use explicit `modelRoute` values when a
-worker should leave the default route for `gpt-5.6-luna`, `gpt-5.6-terra`, or
+`fleet-default`, currently `gpt-5.6-terra`. Use explicit `modelRoute` values
+when a worker should leave the default route for `gpt-5.5`, `gpt-5.6-luna`, or
 `gpt-5.6-sol`.
 
 Use per-route or per-tier overrides only for experiments. Override with

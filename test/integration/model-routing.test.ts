@@ -40,7 +40,7 @@ describe("model tier routing", () => {
       expect(result.task.actualModel).toBe("cheap");
       expect(result.task.requestedModelRoute).toBeUndefined();
       expect(result.task.actualModelRoute).toBe("fleet-default");
-      expect(result.task.workerModel).toBe("gpt-5.5");
+      expect(result.task.workerModel).toBe("gpt-5.6-terra");
       expect(result.task.workerReasoningEffort).toBe("medium");
     } finally {
       await daemon.close().catch(() => undefined);
@@ -118,7 +118,7 @@ describe("model tier routing", () => {
 
       expect(result.task.requestedModelRoute).toBe("gpt-5.6-sol");
       expect(result.task.actualModelRoute).toBe("fleet-default");
-      expect(result.task.workerModel).toBe("gpt-5.5");
+      expect(result.task.workerModel).toBe("gpt-5.6-terra");
     } finally {
       restoreAvailableModelRoutes(previousAvailable);
       await daemon.close().catch(() => undefined);

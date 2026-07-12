@@ -178,11 +178,11 @@ Public MCP tools:
 
 `modelTier` is a cost/capability hint: `cheap`, `standard`, or `strong`.
 `modelRoute` is optional concrete model selection. Omit `modelRoute` for
-Fleet's default route, currently `gpt-5.5`. Use explicit routes only when the
-task justifies leaving that default:
+Fleet's default route, currently `gpt-5.6-terra`. Use explicit routes only when
+the task justifies leaving that default:
 
+- `gpt-5.5` for conservative fallback to the previous default family.
 - `gpt-5.6-luna` for narrow, fast, lowest-cost GPT-5.6 work.
-- `gpt-5.6-terra` for balanced GPT-5.6 implementation or analysis.
 - `gpt-5.6-sol` for the hardest long-horizon, ambiguous, security-sensitive, or
   high-consequence work.
 

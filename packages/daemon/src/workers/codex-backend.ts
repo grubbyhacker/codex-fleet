@@ -190,6 +190,7 @@ export function resolveCodexWorkerConfig(
 function defaultCodexModelForRoute(route: ModelRoute | undefined): string | undefined {
   switch (route) {
     case "fleet-default":
+      return "gpt-5.6-terra";
     case "gpt-5.5":
       return "gpt-5.5";
     case "gpt-5.6-luna":

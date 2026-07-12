@@ -94,23 +94,24 @@ requirement for every repository edit.
 
 ## Explicit GPT-5.6 Route Delegation
 
-Omit `modelRoute` for Fleet's default route, currently `gpt-5.5`. Set
-`modelRoute` only when the task justifies a concrete GPT-5.6 model.
+Omit `modelRoute` for Fleet's default route, currently `gpt-5.6-terra`. Set
+`modelRoute` only when the task justifies a different concrete model.
 
 ```json
 {
   "target": { "repo": "thoughts" },
   "deliveryMode": "research_only",
-  "risk": "standard",
-  "modelTier": "standard",
-  "modelRoute": "gpt-5.6-terra",
-  "prompt": "Use GPT-5.6 Terra for this bounded analysis because newer model behavior is specifically requested. Read repo guidance first and report concise findings with exact paths."
+  "risk": "high",
+  "modelTier": "strong",
+  "modelRoute": "gpt-5.6-sol",
+  "prompt": "Use GPT-5.6 Sol for this security-sensitive architecture review. Read repo guidance first and report concise findings with exact paths."
 }
 ```
 
-Use `gpt-5.6-luna` for narrow fast 5.6 work, `gpt-5.6-terra` for balanced 5.6
+Use `gpt-5.5` for conservative fallback, `gpt-5.6-luna` for narrow fast 5.6
 work, and `gpt-5.6-sol` only for the hardest long-horizon, ambiguous,
-security-sensitive, or high-consequence tasks.
+security-sensitive, or high-consequence tasks. Omit `modelRoute` for normal
+Terra work.
 
 ## Typical Shell Delegation
 
