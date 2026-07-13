@@ -240,6 +240,265 @@ describe("supervision and waiting", () => {
     }
   });
 
+  it("coalesces activity until timeout when waiting for requested statuses", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-coalesced-wait-timeout-"));
+    const paths = resolveFleetPaths(root);
+    const client = createClient(paths, "orch", "orchestrator");
+    let emitActivity: Parameters<WorkerBackend["run"]>[0]["onActivity"];
+    let releaseWorker: (() => void) | undefined;
+    const backend: WorkerBackend = {
+      async run(input) {
+        emitActivity = input.onActivity;
+        await new Promise<void>((resolve) => {
+          releaseWorker = resolve;
+        });
+        return {
+          exitCode: 0,
+          finalResponse: "retained final response",
+          finalResponsePreview: "retained final response",
+          codexThreadId: `fake-thread-${input.taskId}`
+        };
+      }
+    };
+    const daemon = await startDaemon(paths, backend);
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "retained task prompt"
+      })) as { taskId: string };
+      const sinceEventSeq = await latestEventSeq(rpc, delegated.taskId);
+      const startedAt = performance.now();
+      const wait = callDaemon(rpc, "wait_tasks", {
+        taskIds: [delegated.taskId],
+        sinceEventSeq,
+        maxWaitSeconds: 1,
+        returnOnStatuses: ["exited"],
+        wakeOn: "requested_status"
+      });
+      setTimeout(() => emitActivity?.({ kind: "heartbeat", detail: "still-running" }), 50);
+
+      const waited = (await wait) as {
+        snapshots: Array<{ prompt?: string; promptPreview?: string; state: string }>;
+        events: Array<{ seq: number; type: string }>;
+        nextEventSeq: number;
+        wakeReason: string;
+      };
+      const elapsed = performance.now() - startedAt;
+
+      expect(elapsed).toBeGreaterThanOrEqual(850);
+      expect(waited.wakeReason).toBe("timeout");
+      expect(waited.snapshots[0]).toMatchObject({
+        state: "running",
+        promptPreview: "retained task prompt"
+      });
+      expect(waited.snapshots[0]?.prompt).toBeUndefined();
+      expect(waited.events).toContainEqual(expect.objectContaining({ type: "task_activity" }));
+      expect(waited.nextEventSeq).toBe(
+        Math.max(sinceEventSeq, ...waited.events.map((event) => event.seq))
+      );
+    } finally {
+      releaseWorker?.();
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("preserves immediate activity following in any-event mode", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-any-event-wait-"));
+    const paths = resolveFleetPaths(root);
+    const client = createClient(paths, "orch", "orchestrator");
+    let emitActivity: Parameters<WorkerBackend["run"]>[0]["onActivity"];
+    let releaseWorker: (() => void) | undefined;
+    const backend: WorkerBackend = {
+      async run(input) {
+        emitActivity = input.onActivity;
+        await new Promise<void>((resolve) => {
+          releaseWorker = resolve;
+        });
+        return {
+          exitCode: 0,
+          finalResponse: "done",
+          finalResponsePreview: "done",
+          codexThreadId: `fake-thread-${input.taskId}`
+        };
+      }
+    };
+    const daemon = await startDaemon(paths, backend);
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "follow activity"
+      })) as { taskId: string };
+      const sinceEventSeq = await latestEventSeq(rpc, delegated.taskId);
+      const startedAt = performance.now();
+      const wait = callDaemon(rpc, "wait_tasks", {
+        taskIds: [delegated.taskId],
+        sinceEventSeq,
+        maxWaitSeconds: 1
+      });
+      setTimeout(() => emitActivity?.({ kind: "heartbeat", detail: "wake-now" }), 50);
+
+      const waited = (await wait) as {
+        snapshots: Array<{ state: string }>;
+        events: Array<{ type: string }>;
+        wakeReason: string;
+      };
+
+      expect(performance.now() - startedAt).toBeLessThan(800);
+      expect(waited.wakeReason).toBe("any_event");
+      expect(waited.snapshots[0]?.state).toBe("running");
+      expect(waited.events).toContainEqual(expect.objectContaining({ type: "task_activity" }));
+    } finally {
+      releaseWorker?.();
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("interrupts a requested-status wait on terminal state and returns full snapshots on request", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-status-wait-terminal-"));
+    const paths = resolveFleetPaths(root);
+    const client = createClient(paths, "orch", "orchestrator");
+    let releaseWorker: (() => void) | undefined;
+    const backend: WorkerBackend = {
+      async run(input) {
+        await new Promise<void>((resolve) => {
+          releaseWorker = resolve;
+        });
+        return {
+          exitCode: 0,
+          finalResponse: "full final response",
+          finalResponsePreview: "full final response",
+          codexThreadId: `fake-thread-${input.taskId}`
+        };
+      }
+    };
+    const daemon = await startDaemon(paths, backend);
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "full task prompt"
+      })) as { taskId: string };
+      const sinceEventSeq = await latestEventSeq(rpc, delegated.taskId);
+      const startedAt = performance.now();
+      const wait = callDaemon(rpc, "wait_tasks", {
+        taskIds: [delegated.taskId],
+        sinceEventSeq,
+        maxWaitSeconds: 1,
+        returnOnStatuses: ["exited"],
+        wakeOn: "requested_status",
+        snapshotDetail: "full"
+      });
+      setTimeout(() => releaseWorker?.(), 100);
+
+      const waited = (await wait) as {
+        snapshots: Array<{ finalResponse?: string; prompt?: string; state: string }>;
+        events: Array<{ type: string }>;
+        wakeReason: string;
+      };
+      const elapsed = performance.now() - startedAt;
+
+      expect(elapsed).toBeGreaterThanOrEqual(75);
+      expect(elapsed).toBeLessThan(800);
+      expect(waited.wakeReason).toBe("requested_status");
+      expect(waited.snapshots[0]).toMatchObject({
+        state: "exited",
+        prompt: "full task prompt",
+        finalResponse: "full final response"
+      });
+      expect(waited.events).toContainEqual(expect.objectContaining({ type: "task_state" }));
+    } finally {
+      releaseWorker?.();
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("ignores activity in material-event mode but wakes on a lifecycle event", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-material-wait-"));
+    const paths = resolveFleetPaths(root);
+    const client = createClient(paths, "orch", "orchestrator");
+    let emitActivity: Parameters<WorkerBackend["run"]>[0]["onActivity"];
+    let releaseWorker: (() => void) | undefined;
+    const backend: WorkerBackend = {
+      async run(input) {
+        emitActivity = input.onActivity;
+        await new Promise<void>((resolve) => {
+          releaseWorker = resolve;
+        });
+        return {
+          exitCode: 0,
+          finalResponse: "done",
+          finalResponsePreview: "done",
+          codexThreadId: `fake-thread-${input.taskId}`
+        };
+      }
+    };
+    const daemon = await startDaemon(paths, backend);
+    const rpc = { socketPath: paths.socketPath, clientId: "orch", token: client.token };
+
+    try {
+      const delegated = (await callDaemon(rpc, "delegate_task", {
+        target: { shell: true },
+        deliveryMode: "research_only",
+        prompt: "material wait"
+      })) as { taskId: string };
+      const sinceEventSeq = await latestEventSeq(rpc, delegated.taskId);
+      const startedAt = performance.now();
+      const wait = callDaemon(rpc, "wait_tasks", {
+        taskIds: [delegated.taskId],
+        sinceEventSeq,
+        maxWaitSeconds: 1,
+        wakeOn: "material_event"
+      });
+      setTimeout(() => emitActivity?.({ kind: "heartbeat", detail: "not-material" }), 30);
+      setTimeout(
+        () =>
+          emitActivity?.({
+            kind: "codex_event",
+            detail: "apply_patch_end",
+            telemetry: {
+              eventType: "apply_patch_end",
+              toolName: "apply_patch",
+              important: true
+            }
+          }),
+        60
+      );
+      setTimeout(() => releaseWorker?.(), 120);
+
+      const waited = (await wait) as {
+        events: Array<{ type: string }>;
+        wakeReason: string;
+      };
+      const elapsed = performance.now() - startedAt;
+
+      expect(elapsed).toBeGreaterThanOrEqual(90);
+      expect(elapsed).toBeLessThan(800);
+      expect(waited.wakeReason).toBe("material_event");
+      expect(waited.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "task_activity" }),
+          expect.objectContaining({ type: "task_state" })
+        ])
+      );
+      expect(waited.events.filter((event) => event.type === "task_activity")).toHaveLength(2);
+    } finally {
+      releaseWorker?.();
+      await daemon.close().catch(() => undefined);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("records worker timeouts as timed_out", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-fleet-worker-timeout-"));
     const paths = resolveFleetPaths(root);
@@ -286,4 +545,14 @@ async function waitForState(
   return (await callDaemon(rpc, "get_task", { taskId })) as {
     task: { state: string; finalResponse?: string; lastActivityAt?: string };
   };
+}
+
+async function latestEventSeq(
+  rpc: { socketPath: string; clientId: string; token: string },
+  taskId: string
+): Promise<number> {
+  const history = (await callDaemon(rpc, "get_task_history", { taskId, limit: 200 })) as {
+    events: Array<{ seq: number }>;
+  };
+  return Math.max(0, ...history.events.map((event) => event.seq));
 }

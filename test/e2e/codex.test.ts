@@ -230,7 +230,10 @@ async function waitForExit(
     const waited = (await callDaemon(rpc, "wait_tasks", {
       taskIds: [taskId],
       sinceEventSeq,
-      maxWaitSeconds: 10
+      maxWaitSeconds: 10,
+      returnOnStatuses: ["exited", "failed_to_start", "cancelled", "timed_out", "stale"],
+      wakeOn: "requested_status",
+      snapshotDetail: "compact"
     })) as {
       snapshots: Array<{
         state: string;
@@ -239,8 +242,9 @@ async function waitForExit(
         workerStderr?: string;
       }>;
       events: Array<{ seq: number }>;
+      nextEventSeq: number;
     };
-    sinceEventSeq = Math.max(sinceEventSeq, ...waited.events.map((event) => event.seq));
+    sinceEventSeq = waited.nextEventSeq;
     const snapshot = waited.snapshots[0];
     if (snapshot?.state === "exited") {
       return (await callDaemon(rpc, "get_task", { taskId })) as {

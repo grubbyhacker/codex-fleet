@@ -146,7 +146,8 @@ describe("daemon rpc", () => {
         taskIds: [delegated.taskId],
         sinceEventSeq: 999,
         returnOnStatuses: ["exited"],
-        maxWaitSeconds: 1
+        maxWaitSeconds: 1,
+        snapshotDetail: "full"
       })) as {
         snapshots: Array<{ finalResponse?: string; finalResponsePreview?: string }>;
       };
@@ -289,7 +290,8 @@ describe("daemon rpc", () => {
         taskIds: [delegated.taskId],
         sinceEventSeq: 999,
         returnOnStatuses: ["exited"],
-        maxWaitSeconds: 1
+        maxWaitSeconds: 1,
+        snapshotDetail: "full"
       })) as {
         snapshots: Array<{ workerStderr?: string; workerStderrPreview?: string }>;
       };

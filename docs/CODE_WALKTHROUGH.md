@@ -111,12 +111,14 @@ MCP Tool / CLI / TUI -> callDaemon -> TCP/Unix socket -> rpc/server.ts -> servic
   - `delegateTask` emits `task_created`, optional `model_routing`, optional `task_resource`, initial `task_state` (`running`)
   - `runWorker` emits `task_state` on exit/failure/timeout
   - `refreshStaleTasks` upgrades stale `running` tasks
-  - `waitTasks` returns snapshots + event deltas + suggested backoff, and emits `task_observation` when an active task stays quiet for a wait slice.
+  - `waitTasks` uses interruptible event notifications and returns snapshots, coalesced event deltas, `nextEventSeq`, `wakeReason`, and suggested backoff. It emits `task_observation` when an active task stays quiet for a wait slice.
 
 ### 5.3 Staleness and wait semantics
 
 - `staleAfterMs` defaults to 5 minutes; long-running no-activity tasks move to `stale`.
-- `wait_tasks` returns immediately when watched task status already satisfies `returnOnStatuses`, otherwise sleeps and rechecks.
+- `wait_tasks` supports `wakeOn` modes: `any_event` preserves immediate event following, `material_event` ignores activity/observation wakeups, and `requested_status` coalesces events until a requested state or timeout.
+- `requested_status` requires `returnOnStatuses`; terminal or stale transitions interrupt the wait immediately.
+- Compact snapshots omit retained prompt/output/stderr bodies by default while preserving previews; callers can request `snapshotDetail: "full"`.
 - Design/limits are enforced by schema `maxWaitSeconds <= 45` in shared schema.
 
 ### 5.4 Event and history guarantees

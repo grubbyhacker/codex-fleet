@@ -174,6 +174,15 @@ Public MCP tools:
 - `get_task_history`
 - `end_task`
 
+`wait_tasks` is the bounded orchestration wait. Use `wakeOn:
+"requested_status"` with terminal/stale `returnOnStatuses` to coalesce
+heartbeats and tool telemetry until a requested state or timeout. Carry the
+returned `nextEventSeq` into the next call as `sinceEventSeq`. Compact snapshots
+are returned by default; request `snapshotDetail: "full"` only when retained
+prompt, output, or stderr bodies are needed. `wakeOn: "any_event"` retains the
+event-follower behavior, while `"material_event"` ignores activity and
+observation events as wake triggers.
+
 ## Model Routing
 
 `modelTier` is a cost/capability hint: `cheap`, `standard`, or `strong`.

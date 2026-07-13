@@ -171,17 +171,37 @@ export const eventSchema = z.object({
 });
 export type Event = z.infer<typeof eventSchema>;
 
-export const waitTasksRequestSchema = z.object({
-  taskIds: z.array(z.string().min(1)).min(1),
-  sinceEventSeq: z.number().int().nonnegative().optional(),
-  maxWaitSeconds: z.number().int().positive().max(45).optional(),
-  returnOnStatuses: z.array(taskStateSchema).optional()
-});
+export const waitWakeModeSchema = z.enum(["any_event", "material_event", "requested_status"]);
+export type WaitWakeMode = z.infer<typeof waitWakeModeSchema>;
+
+export const waitSnapshotDetailSchema = z.enum(["compact", "full"]);
+export type WaitSnapshotDetail = z.infer<typeof waitSnapshotDetailSchema>;
+
+export const waitTasksRequestSchema = z
+  .object({
+    taskIds: z.array(z.string().min(1)).min(1),
+    sinceEventSeq: z.number().int().nonnegative().optional(),
+    maxWaitSeconds: z.number().int().positive().max(45).optional(),
+    returnOnStatuses: z.array(taskStateSchema).min(1).optional(),
+    wakeOn: waitWakeModeSchema.default("any_event"),
+    snapshotDetail: waitSnapshotDetailSchema.default("compact")
+  })
+  .superRefine((request, context) => {
+    if (request.wakeOn === "requested_status" && !request.returnOnStatuses) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["returnOnStatuses"],
+        message: 'returnOnStatuses is required when wakeOn is "requested_status"'
+      });
+    }
+  });
 export type WaitTasksRequest = z.infer<typeof waitTasksRequestSchema>;
 
 export const waitTasksResponseSchema = z.object({
   snapshots: z.array(taskSnapshotSchema),
   events: z.array(eventSchema),
+  nextEventSeq: z.number().int().nonnegative(),
+  wakeReason: z.enum(["any_event", "material_event", "requested_status", "timeout"]),
   suggestedNextWaitSeconds: z.number().int().positive()
 });
 export type WaitTasksResponse = z.infer<typeof waitTasksResponseSchema>;

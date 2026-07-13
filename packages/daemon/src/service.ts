@@ -69,6 +69,7 @@ export class FleetService {
   private readonly cleanup: CleanupManager;
   private nextSeq: number;
   private readonly sessions = new Map<string, OwnerSession>();
+  private readonly eventWaiters = new Set<() => void>();
 
   constructor(
     readonly paths: FleetPaths,
@@ -542,24 +543,43 @@ export class FleetService {
     request: ReturnType<typeof waitTasksRequestSchema.parse>,
     client?: ClientRecord
   ) {
-    let snapshots = request.taskIds.map((taskId) => this.requireTask(clientId, taskId, client));
-    let events = this.state.eventsSince(request.sinceEventSeq, request.taskIds);
-    if (events.length === 0 && !matchesReturnStatus(snapshots, request.returnOnStatuses)) {
-      await sleep(Math.min(request.maxWaitSeconds ?? 5, 45) * 1000);
+    const waitSeconds = Math.min(request.maxWaitSeconds ?? 5, 45);
+    const deadline = Date.now() + waitSeconds * 1000;
+
+    while (true) {
       this.refreshStaleTasks();
-      snapshots = request.taskIds.map((taskId) => this.requireTask(clientId, taskId, client));
-      events = this.state.eventsSince(request.sinceEventSeq, request.taskIds);
-      if (events.length === 0) {
-        events = snapshots
-          .filter((task) => task.state === "running" || task.state === "stale")
-          .map((task) => this.append("task_observation", task.id, quietObservation(task)));
+      const snapshots = request.taskIds.map((taskId) => this.requireTask(clientId, taskId, client));
+      let events = this.state.eventsSince(request.sinceEventSeq, request.taskIds);
+      const statusMatched = matchesReturnStatus(snapshots, request.returnOnStatuses);
+      const eventMatched = events.some((event) => eventMatchesWakeMode(event, request.wakeOn));
+      const timedOut = Date.now() >= deadline;
+
+      if (statusMatched || eventMatched || timedOut) {
+        if (timedOut && events.length === 0) {
+          events = snapshots
+            .filter((task) => task.state === "running" || task.state === "stale")
+            .map((task) => this.append("task_observation", task.id, quietObservation(task)));
+        }
+        return {
+          snapshots: snapshots.map((task) =>
+            request.snapshotDetail === "full" ? task : compactWaitTaskSnapshot(task)
+          ),
+          events,
+          nextEventSeq: events.reduce(
+            (latest, event) => Math.max(latest, event.seq),
+            request.sinceEventSeq ?? 0
+          ),
+          wakeReason: statusMatched
+            ? "requested_status"
+            : eventMatched
+              ? request.wakeOn
+              : "timeout",
+          suggestedNextWaitSeconds: waitSeconds
+        };
       }
+
+      await this.waitForEvent(deadline - Date.now());
     }
-    return {
-      snapshots,
-      events,
-      suggestedNextWaitSeconds: Math.min(request.maxWaitSeconds ?? 5, 45)
-    };
   }
 
   private requireTask(clientId: string, taskId: string, client?: ClientRecord) {
@@ -601,7 +621,27 @@ export class FleetService {
     this.nextSeq += 1;
     this.eventLog.append(event);
     this.state.apply(event);
+    for (const wake of [...this.eventWaiters]) {
+      wake();
+    }
     return event;
+  }
+
+  private async waitForEvent(maxWaitMs: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = () => {
+        if (timer === undefined) {
+          return;
+        }
+        clearTimeout(timer);
+        timer = undefined;
+        this.eventWaiters.delete(finish);
+        resolve();
+      };
+      timer = setTimeout(finish, Math.max(0, maxWaitMs));
+      this.eventWaiters.add(finish);
+    });
   }
 
   private appendEnvironmentFriction(
@@ -649,6 +689,27 @@ function compactTaskSnapshot(task: TaskSnapshot): TaskSnapshot {
   void workerStderr;
   void workerStderrPreview;
   return compact;
+}
+
+function compactWaitTaskSnapshot(task: TaskSnapshot): TaskSnapshot {
+  const { finalResponse, prompt, workerStderr, ...compact } = task;
+  void finalResponse;
+  void prompt;
+  void workerStderr;
+  return compact;
+}
+
+function eventMatchesWakeMode(
+  event: Event,
+  wakeOn: ReturnType<typeof waitTasksRequestSchema.parse>["wakeOn"]
+): boolean {
+  if (wakeOn === "requested_status") {
+    return false;
+  }
+  if (wakeOn === "material_event") {
+    return event.type !== "task_activity" && event.type !== "task_observation";
+  }
+  return true;
 }
 
 function quietObservation(task: TaskSnapshot): {
@@ -987,8 +1048,4 @@ function matchesReturnStatus(
   return Boolean(
     statuses?.some((status) => snapshots.some((snapshot) => snapshot.state === status))
   );
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
 }
