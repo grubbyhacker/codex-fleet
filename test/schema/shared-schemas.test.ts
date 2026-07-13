@@ -31,6 +31,34 @@ describe("shared schemas", () => {
     ).toThrow();
   });
 
+  it("defaults waits to compatible event wakes with compact snapshots", () => {
+    const parsed = waitTasksRequestSchema.parse({ taskIds: ["task-1"] });
+
+    expect(parsed.wakeOn).toBe("any_event");
+    expect(parsed.snapshotDetail).toBe("compact");
+  });
+
+  it("requires requested statuses for status-only wake mode", () => {
+    const invalid = waitTasksRequestSchema.safeParse({
+      taskIds: ["task-1"],
+      wakeOn: "requested_status"
+    });
+    expect(invalid.success).toBe(false);
+    if (!invalid.success) {
+      expect(invalid.error.issues[0]?.message).toBe(
+        'returnOnStatuses is required when wakeOn is "requested_status"'
+      );
+    }
+
+    expect(
+      waitTasksRequestSchema.parse({
+        taskIds: ["task-1"],
+        wakeOn: "requested_status",
+        returnOnStatuses: ["exited"]
+      }).wakeOn
+    ).toBe("requested_status");
+  });
+
   it("requires authenticated daemon RPC envelopes with known methods", () => {
     const parsed = rpcEnvelopeSchema.parse({
       requestId: "req-1",

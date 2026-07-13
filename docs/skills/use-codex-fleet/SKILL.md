@@ -32,8 +32,8 @@ Use the official `codex-fleet` MCP tools.
    - Use `wait_tasks` as the primary monitoring primitive.
    - Do not run shell sleeps such as `sleep 30` to wait for Fleet work. `wait_tasks` is the wait primitive.
    - Do not poll a known task with repeated `list_tasks`; use `wait_tasks` for active monitoring and `get_task` after terminal/stale/unexpected states. `list_tasks` is for broad context checks, not per-task wait loops.
-   - For normal active workers, use `maxWaitSeconds` 30-45 and include terminal/stale `returnOnStatuses`.
-   - Carry forward the highest event `seq` you have seen as `sinceEventSeq`.
+   - For normal active workers, use `maxWaitSeconds` 30-45, `wakeOn: "requested_status"`, `snapshotDetail: "compact"`, and include terminal/stale `returnOnStatuses`. This coalesces ordinary activity until a requested state or timeout.
+   - Carry forward response `nextEventSeq` as the next `sinceEventSeq`.
    - Quiet workers can happen. Do not call `get_task` just because a worker has not emitted detailed progress, but do surface the concrete `wait_tasks` facts: returned events, current state, `lastActivityAt`, and quiet duration when present.
    - Use `get_task` after terminal, stale, failed, or unexpected states, or when you need full prompt/output/stderr/worktree details.
    - Do not narrate every wait loop. Do not post user-visible status merely because `wait_tasks` returned and you are about to wait again.

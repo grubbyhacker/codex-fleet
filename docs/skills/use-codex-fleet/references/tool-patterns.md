@@ -10,7 +10,7 @@ Available MCP methods:
 - `list_targets({})`
 - `delegate_task({ target, deliveryMode, risk, modelTier, modelRoute, prompt })`
 - `get_task({ "taskId": "<full-id>" })`
-- `wait_tasks({ taskIds, sinceEventSeq, maxWaitSeconds, returnOnStatuses })`
+- `wait_tasks({ taskIds, sinceEventSeq, maxWaitSeconds, returnOnStatuses, wakeOn, snapshotDetail })`
 - `list_tasks({ states, targetId, updatedSince, limit })`
 - `get_task_history({ taskId, limit })`
 - `end_task({ taskId, reason })`
@@ -148,18 +148,20 @@ Pseudo-flow:
 {
   "taskIds": ["<full-task-id>"],
   "maxWaitSeconds": 45,
-  "returnOnStatuses": ["exited", "failed_to_start", "cancelled", "timed_out", "stale"]
+  "returnOnStatuses": ["exited", "failed_to_start", "cancelled", "timed_out", "stale"],
+  "wakeOn": "requested_status",
+  "snapshotDetail": "compact"
 }
 ```
 
 3. Read returned `events` and `snapshots`.
 4. Note `suggestedNextWaitSeconds`; use it as a pacing hint, but prefer 30-45s waits for ordinary running workers.
-5. Save the maximum returned `event.seq`; pass it as `sinceEventSeq` on the next wait.
+5. Save returned `nextEventSeq`; pass it as `sinceEventSeq` on the next wait.
 6. If a snapshot is terminal or stale, call `get_task`.
 7. If the terminal state is surprising, such as `timed_out` after recent activity, call `get_task_history` before deciding whether to resume, inspect the worktree, or report a blocker.
 8. If still running, continue waiting. Do not send a user-visible message just because the wait loop continues.
 
-`wait_tasks` returns immediately when new events exist or when a snapshot already matches `returnOnStatuses`. Otherwise it sleeps up to `maxWaitSeconds` capped at 45 seconds.
+With `wakeOn: "requested_status"`, `wait_tasks` coalesces new events and returns when a snapshot matches `returnOnStatuses` or the bounded timeout expires. Requested state transitions interrupt the wait immediately. `wakeOn: "any_event"` preserves immediate event-following behavior, and `wakeOn: "material_event"` ignores `task_activity` and `task_observation` as wake triggers. `returnOnStatuses` alone does not suppress ordinary event wakes.
 
 When a running worker emits no detail during a wait slice, `wait_tasks` can return a `task_observation` event with the current state, `lastActivityAt`, and quiet duration. Use those facts to keep your own confidence in the task state, not as a reason to post another status line. Do not call `get_task` repeatedly or shorten waits only because a worker has not emitted detailed progress. Fleet will mark quiet workers `stale` when the daemon's stale threshold is reached.
 

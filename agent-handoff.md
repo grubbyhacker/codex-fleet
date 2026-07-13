@@ -436,3 +436,12 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 - Persisted `requestedModelRoute`, `actualModelRoute`, and `workerModel` so orchestrator Sol selection can be audited.
 - Updated MCP metadata and the Fleet skill guidance to reserve Sol for hard, high-consequence work.
 - Verified aggregate `mise exec -- bun run check` and a real Codex MCP smoke for `modelRoute: "gpt-5.6-luna"`.
+
+## 2026-07-13 Coalesced Task Waits
+
+### Did
+
+- Added `DCR-0014` and explicit `wait_tasks` wake modes for event following, material changes, and requested states.
+- Replaced fixed sleeps with interruptible event notification so requested terminal/stale states wake immediately while activity is coalesced.
+- Added compact-by-default wait snapshots, `nextEventSeq`, and `wakeReason`; updated MCP and Fleet skill guidance.
+- Added regression coverage for heartbeat/telemetry coalescing, timeout, terminal interruption, material-event filtering, compatibility behavior, cursors, and snapshot detail.
