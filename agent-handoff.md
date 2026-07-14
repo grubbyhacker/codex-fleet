@@ -462,3 +462,12 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 - Added persistent raw-token, call-count, cached-versus-fresh input, output/reasoning, and per-turn model breakdowns to the TUI.
 - Streamed only candidate rollout files and retained the one-minute usage cache so conversation content is not loaded into dashboard state.
 - Added regression coverage for reporting windows, partial/malformed rollouts, total-only usage, missing files, and model switches within a conversation.
+
+## 2026-07-14 LaunchAgent Worker Path Hardening
+
+### Did
+
+- Changed LaunchAgent generation to select an installed Codex CLI instead of unconditionally pinning a possibly absent application-bundle path.
+- Preserved recognized environment settings from an existing LaunchAgent plist across binary redeploys while discarding a persisted Codex path that no longer exists.
+- Added regression coverage for installed-command fallback and persisted repository-catalog environment settings.
+- Verified the live fix with a real Luna worker launch and clean terminal response.

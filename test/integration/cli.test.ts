@@ -9,6 +9,10 @@ import { resolveFleetPaths } from "../../packages/daemon/src/paths.js";
 import { createClient } from "../../packages/daemon/src/rpc/auth.js";
 import { callDaemon } from "../../packages/daemon/src/rpc/client.js";
 import { startDaemon } from "../../packages/daemon/src/rpc/server.js";
+import {
+  launchAgentEnvironment,
+  resolveLaunchAgentCodexCommand
+} from "../../packages/cli/src/index.js";
 
 describe("cli views", () => {
   it("lists and reads tasks across clients through daemon rpc", async () => {
@@ -143,6 +147,32 @@ describe("cli views", () => {
     } finally {
       restoreEnv("CODEX_FLEET_CODEX_MODEL", previousModel);
       restoreEnv("CODEX_FLEET_AGENT_INFRA_ROOT", previousAgentInfraRoot);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("uses an installed Codex fallback and preserves valid LaunchAgent settings", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-fleet-cli-launch-env-"));
+    const installedCodex = join(root, "bin", "codex");
+    mkdirSync(join(root, "bin"), { recursive: true });
+    writeFileSync(installedCodex, "#!/bin/sh\n");
+    try {
+      expect(resolveLaunchAgentCodexCommand([join(root, "missing-codex"), installedCodex])).toBe(
+        installedCodex
+      );
+      const environment = Object.fromEntries(
+        launchAgentEnvironment(
+          {
+            CODEX_FLEET_AGENT_INFRA_ROOT: join(root, "agent-infra"),
+            CODEX_FLEET_CODEX_COMMAND: join(root, "removed-codex")
+          },
+          {},
+          [installedCodex]
+        )
+      );
+      expect(environment.CODEX_FLEET_AGENT_INFRA_ROOT).toBe(join(root, "agent-infra"));
+      expect(environment.CODEX_FLEET_CODEX_COMMAND).toBe(installedCodex);
+    } finally {
       rmSync(root, { force: true, recursive: true });
     }
   });
