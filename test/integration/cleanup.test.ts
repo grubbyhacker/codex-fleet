@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -105,6 +105,12 @@ describe("cleanup", () => {
       const cleanTask = await getTask(rpc, clean.taskId);
       expect(existsSync(cleanTask.worktreePath ?? "")).toBe(true);
       expect(branchExists(repo, cleanTask.branch ?? "")).toBe(true);
+      const ignoredCache = join(cleanTask.worktreePath ?? "", ".cache", "module");
+      mkdirSync(ignoredCache, { recursive: true });
+      writeFileSync(join(ignoredCache, "artifact"), "generated\n");
+      chmodSync(join(ignoredCache, "artifact"), 0o444);
+      chmodSync(ignoredCache, 0o555);
+      chmodSync(join(cleanTask.worktreePath ?? "", ".cache"), 0o555);
       const previousPath = process.env.PATH;
       process.env.PATH = "";
       try {
@@ -122,10 +128,15 @@ describe("cleanup", () => {
       const dirty = await delegatePatch(rpc);
       const dirtyTask = await getTask(rpc, dirty.taskId);
       writeFileSync(join(dirtyTask.worktreePath ?? "", "dirty.txt"), "do not delete\n");
+      const preservedCache = join(dirtyTask.worktreePath ?? "", ".cache");
+      mkdirSync(preservedCache, { recursive: true });
+      writeFileSync(join(preservedCache, "artifact"), "preserve while dirty\n");
+      chmodSync(join(preservedCache, "artifact"), 0o444);
       await expect(callDaemon(rpc, "end_task", { taskId: dirty.taskId })).rejects.toThrow(
         "cleanup_blocked_dirty"
       );
       expect(existsSync(dirtyTask.worktreePath ?? "")).toBe(true);
+      expect(existsSync(join(preservedCache, "artifact"))).toBe(true);
     } finally {
       await daemon.close().catch(() => undefined);
       rmSync(root, { force: true, recursive: true });
@@ -164,7 +175,8 @@ function branchExists(repo: string, branch: string): boolean {
 function initRepo(path: string): void {
   execFileSync("git", ["init", "-b", "main", path], { stdio: "ignore" });
   writeFileSync(join(path, "README.md"), "# fixture\n");
-  execFileSync("git", ["add", "README.md"], { cwd: path, stdio: "ignore" });
+  writeFileSync(join(path, ".gitignore"), ".cache/\n");
+  execFileSync("git", ["add", "README.md", ".gitignore"], { cwd: path, stdio: "ignore" });
   execFileSync(
     "git",
     [

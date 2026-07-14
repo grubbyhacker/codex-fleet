@@ -207,7 +207,7 @@ MCP Tool / CLI / TUI -> callDaemon -> TCP/Unix socket -> rpc/server.ts -> servic
 ### 9.2 Worktree release process
 
 - Cleanup manager: [packages/daemon/src/cleanup/cleanup-manager.ts](../packages/daemon/src/cleanup/cleanup-manager.ts)
-  - For terminal tasks: `git worktree remove` and `git worktree prune`.
+  - For terminal tasks: verify there are no tracked or untracked changes, make Fleet-owned artifacts owner-writable, remove ignored build caches with `git clean -ffdx`, then force-remove and prune the worktree.
   - Branch deletion via `git branch -d` helper.
   - Dirty worktrees return `cleanup_blocked_dirty` and must be handled explicitly.
 - `end_task` endpoint calls cleanup path in service:

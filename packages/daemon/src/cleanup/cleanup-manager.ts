@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 import type { TaskSnapshot } from "@codex-fleet/shared";
 
@@ -49,7 +50,12 @@ export class CleanupManager {
       throw new FleetError("conflict", `cleanup_blocked_dirty: ${task.worktreePath}`, "get_task");
     }
 
-    execFileSync(git, ["worktree", "remove", task.worktreePath], {
+    makeOwnerWritable(task.worktreePath);
+    execFileSync(git, ["clean", "-ffdx"], {
+      cwd: task.worktreePath,
+      stdio: "ignore"
+    });
+    execFileSync(git, ["worktree", "remove", "--force", task.worktreePath], {
       cwd: ownerPath,
       stdio: "ignore"
     });
@@ -60,6 +66,20 @@ export class CleanupManager {
     const branchDeleted = task.branch ? deleteBranchIfMerged(ownerPath, task.branch) : false;
 
     return { cleaned: true, branchDeleted };
+  }
+}
+
+function makeOwnerWritable(path: string): void {
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink()) {
+    return;
+  }
+  chmodSync(path, stat.mode | (stat.isDirectory() ? 0o700 : 0o600));
+  if (!stat.isDirectory()) {
+    return;
+  }
+  for (const entry of readdirSync(path)) {
+    makeOwnerWritable(join(path, entry));
   }
 }
 
