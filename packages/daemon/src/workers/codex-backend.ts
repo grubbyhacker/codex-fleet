@@ -268,6 +268,7 @@ function workerInstructions(input: WorkerInput): string {
     `Task id: ${input.taskId}`,
     input.branch ? `Branch: ${input.branch}` : undefined,
     workspace,
+    privateFilesystemDiscoveryInstructions(),
     largeArtifactInstructions(),
     environmentFrictionInstructions(),
     "shell" in input.request.target ? boundedShellDiagnosticsInstructions() : undefined,
@@ -278,6 +279,14 @@ function workerInstructions(input: WorkerInput): string {
   ]
     .filter((line): line is string => Boolean(line))
     .join("\n");
+}
+
+function privateFilesystemDiscoveryInstructions(): string {
+  return [
+    "Private filesystem discovery guardrail: work from the assigned cwd and paths explicitly named in the task; do not try to locate repositories or files by recursively searching the operator's home directory or other broad host roots.",
+    "Do not run find, rg, du, ls -R, or equivalent recursive traversal rooted at /, /Users, $HOME, or ~. These searches are usually low-signal and may inspect private data, trigger macOS privacy prompts, waste time and tokens, or block an unattended task.",
+    "If a required path is unknown, check only likely task-specific roots with a shallow explicit depth, or stop and report the missing path so the orchestrator can provide it. A task that genuinely requires broad host traversal must say so explicitly."
+  ].join(" ");
 }
 
 function largeArtifactInstructions(): string {
