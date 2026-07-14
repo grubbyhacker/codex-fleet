@@ -4,6 +4,8 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { runDeployWorkerSmoke } from "./deploy-worker-smoke.js";
+
 type AdapterProcess = {
   pid: number;
   ppid: number;
@@ -15,13 +17,14 @@ const args = new Set(process.argv.slice(2));
 const allowActive = args.has("--allow-active");
 const skipDaemonRestart = args.has("--skip-daemon-restart");
 const skipSkill = args.has("--skip-skill");
+const skipWorkerSmoke = args.has("--skip-worker-smoke");
 const staleFreshMs = Number(process.env.CODEX_FLEET_DEPLOY_FRESH_STALE_MS ?? 60 * 60 * 1000);
 const installDir = process.env.CODEX_FLEET_INSTALL_BIN_DIR ?? join(homedir(), ".local", "bin");
 const fleetCli = join(installDir, "codex-fleet");
 
 if (args.has("--help")) {
   process.stdout
-    .write(`Usage: bun run deploy:local [--allow-active] [--skip-daemon-restart] [--skip-skill]
+    .write(`Usage: bun run deploy:local [--allow-active] [--skip-daemon-restart] [--skip-skill] [--skip-worker-smoke]
 
 Build and deploy local Codex Fleet binaries predictably.
 
@@ -30,6 +33,7 @@ Behavior:
 - builds and installs binaries;
 - installs the use-codex-fleet skill unless --skip-skill is passed;
 - restarts only the LaunchAgent daemon unless --skip-daemon-restart is passed;
+- runs a paid, minimal Luna worker through the installed daemon unless --skip-worker-smoke is passed;
 - never kills codex-fleet-mcp adapter processes.
 
 Existing MCP clients keep their current stdio adapter until they reconnect.
@@ -70,6 +74,7 @@ if (!skipSkill) {
 }
 
 let daemonStatus: unknown = { skipped: true };
+let workerSmoke: unknown = { skipped: true };
 if (!skipDaemonRestart) {
   if (!existsSync(fleetCli)) {
     throw new Error(`Installed codex-fleet CLI not found after install: ${fleetCli}`);
@@ -81,6 +86,23 @@ if (!skipDaemonRestart) {
     "launch-agent",
     "status"
   ]);
+  if (!skipWorkerSmoke) {
+    process.stdout.write("\n==> run installed-daemon worker smoke\n");
+    const paths = resolveFleetPaths();
+    const rpc = {
+      socketPath: paths.socketPath,
+      clientId: "cli",
+      token: readClientToken(paths, "cli")
+    };
+    workerSmoke = await runDeployWorkerSmoke({
+      call: (method, params) => callDaemon(rpc, method, params)
+    });
+    process.stdout.write(`${JSON.stringify(workerSmoke, null, 2)}\n`);
+  }
+} else if (!skipWorkerSmoke) {
+  process.stdout.write(
+    "Worker smoke skipped because --skip-daemon-restart was passed; it only validates a freshly restarted installed daemon.\n"
+  );
 }
 
 const afterAdapters = listAdapterProcesses();
@@ -98,7 +120,8 @@ process.stdout.write(
       activeTaskCount: taskPreflight.active.length,
       ignoredOldStaleTaskCount: taskPreflight.ignoredOldStale.length,
       adapterProcesses: afterAdapters,
-      daemonStatus
+      daemonStatus,
+      workerSmoke
     },
     null,
     2
