@@ -100,7 +100,9 @@ const storedSessionSchema = z
 const eventPayloads = {
   session_created: z.object({ session: storedSessionSchema }).strict(),
   turn_enqueued: z.object({ turn: storedTurnSchema }).strict(),
-  attempt_started: z.object({ conversation: conversationRefSchema.optional() }).strict(),
+  attempt_started: z
+    .object({ turn: storedTurnSchema, conversation: conversationRefSchema.optional() })
+    .strict(),
   attempt_completed: z
     .object({ conversation: conversationRefSchema, facts: facts.optional() })
     .strict(),
@@ -228,14 +230,21 @@ export class SessionSupervisor {
   private readonly running = new Set<string>();
   private readonly ready: string[] = [];
   private draining = false;
+  private readonly maxConcurrentSessions: number;
   constructor(
     private readonly journal: SessionJournal,
     private readonly runtime: RuntimeAdapter,
     private readonly verifier: CompletionVerifier,
     private readonly ids: Ids = new SequenceIds(),
     private readonly maxVerifierContinuations = 1,
-    private readonly maxConcurrentSessions = Number.POSITIVE_INFINITY
+    maxConcurrentSessions = Number.POSITIVE_INFINITY
   ) {
+    if (
+      maxConcurrentSessions !== Number.POSITIVE_INFINITY &&
+      (!Number.isInteger(maxConcurrentSessions) || maxConcurrentSessions <= 0)
+    )
+      throw new RangeError("maxConcurrentSessions must be a positive integer or Infinity");
+    this.maxConcurrentSessions = maxConcurrentSessions;
     this.replay();
   }
   createSession(command: z.input<typeof createSessionSchema>): SessionStatus {
@@ -299,6 +308,7 @@ export class SessionSupervisor {
     const session = this.require(input.sessionId);
     if (session.phase === "terminated") throw new Error("terminated session cannot resume");
     this.write("session_resumed", input.sessionId, undefined, undefined, {});
+    this.admitQueued(session);
     return this.status(input.sessionId);
   }
   terminateSession(
@@ -358,8 +368,20 @@ export class SessionSupervisor {
   }
   private enqueue(turn: TurnStatus): void {
     this.write("turn_enqueued", turn.sessionId, turn.turnId, undefined, { turn });
-    if (!this.ready.includes(turn.sessionId)) this.ready.push(turn.sessionId);
+    this.markReady(this.require(turn.sessionId));
     void this.schedule();
+  }
+  private admitQueued(session: SessionStatus): void {
+    this.markReady(session);
+    void this.schedule();
+  }
+  private markReady(session: SessionStatus): void {
+    if (
+      session.phase === "active" &&
+      session.turnIds.some((turnId) => this.turn(turnId).phase === "queued") &&
+      !this.ready.includes(session.sessionId)
+    )
+      this.ready.push(session.sessionId);
   }
   private async schedule(): Promise<void> {
     if (this.draining) return;
@@ -398,6 +420,7 @@ export class SessionSupervisor {
     const attemptId = this.uniqueId("attempt");
     turn.attemptIds.push(attemptId);
     this.write("attempt_started", session.sessionId, turn.turnId, attemptId, {
+      turn,
       conversation: session.conversation
     });
     const input: RuntimeInput = {
@@ -418,12 +441,14 @@ export class SessionSupervisor {
       ) {
         turn.recoveryFacts.push("backend_thread_missing_fresh_adapter_attempt");
         session.conversation = undefined;
+        // This durable state means the failed invocation is known, and exactly one fresh
+        // adapter attempt is safe to admit. It must not be mistaken for an unknown in-flight run.
+        turn.phase = "queued";
         this.write("continuity_degraded", session.sessionId, turn.turnId, attemptId, {
           turn,
           facts: turn.recoveryFacts
         });
-        turn.phase = "queued";
-        if (!this.ready.includes(session.sessionId)) this.ready.push(session.sessionId);
+        this.markReady(session);
         return;
       }
       turn.phase = error instanceof MissingBackendThreadError ? "failed" : "reconciliation";
@@ -502,6 +527,9 @@ export class SessionSupervisor {
           break;
         case "verifier_continuation":
           this.restoreTurn(event.payload.continuationTurn);
+          break;
+        case "attempt_started":
+          this.restoreTurn(event.payload.turn);
           break;
         case "attempt_completed": {
           const session = this.sessions.get(event.sessionId);

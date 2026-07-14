@@ -6,10 +6,14 @@ import {
   MissingBackendThreadError,
   SequenceIds,
   SessionSupervisor,
+  type AgentdEvent,
   type CompletionVerifier,
   type RuntimeAdapter,
   type RuntimeInput,
-  type RuntimeResult
+  type RuntimeResult,
+  type SessionJournal,
+  type SessionStatus,
+  type TurnStatus
 } from "@codex-fleet/session-supervisor";
 
 class ControlledAdapter implements RuntimeAdapter {
@@ -25,6 +29,18 @@ class ControlledAdapter implements RuntimeAdapter {
     resolve({
       conversation: { adapterKind: "test", adapterVersion: "1", backendThreadRef: thread }
     });
+  }
+}
+
+class ReplayJournal implements SessionJournal {
+  constructor(private readonly events: AgentdEvent[]) {}
+  append(event: Parameters<SessionJournal["append"]>[0]): AgentdEvent {
+    const written = { ...event, cursor: this.events.length + 1 } as AgentdEvent;
+    this.events.push(written);
+    return written;
+  }
+  read(): AgentdEvent[] {
+    return this.events;
   }
 }
 
@@ -287,28 +303,12 @@ describe("session supervisor spike", () => {
     });
   });
 
-  it("replays terminal, cancelled, reconciliation, and continuity-degraded state and avoids reset ID collisions", async () => {
+  it("replays unresolved attempts for reconciliation and remains collision-safe on a second restart", async () => {
     const journal = new InMemorySessionJournal();
     const adapter = new ControlledAdapter();
     const supervisor = new SessionSupervisor(journal, adapter, satisfied, new SequenceIds());
-    const terminal = supervisor.createSession(command("terminal"));
-    const cancelled = supervisor.createSession(command("cancelled"));
-    const interrupted = supervisor.createSession(command("interrupted"));
-    const continuity = supervisor.createSession(command("continuity"));
-    const queued = supervisor.submitTurn(turn(terminal.sessionId, "queued"));
-    supervisor.terminateSession({
-      version: AGENTD_PROTOCOL_VERSION,
-      sessionId: terminal.sessionId
-    });
-    const cancelledTurn = supervisor.submitTurn(turn(cancelled.sessionId, "cancel"));
-    await settle();
-    await supervisor.cancelTurn({
-      version: AGENTD_PROTOCOL_VERSION,
-      sessionId: cancelled.sessionId,
-      turnId: cancelledTurn.turnId
-    });
-    const interruptedTurn = supervisor.submitTurn(turn(interrupted.sessionId, "broken"));
-    const continuityTurn = supervisor.submitTurn(turn(continuity.sessionId, "missing"));
+    const session = supervisor.createSession(command("interrupted"));
+    const accepted = supervisor.submitTurn(turn(session.sessionId, "broken"));
     await settle();
     const replayed = new SessionSupervisor(
       journal,
@@ -320,17 +320,185 @@ describe("session supervisor spike", () => {
       satisfied,
       new SequenceIds()
     );
-    expect(
-      replayed.getStatus({ version: AGENTD_PROTOCOL_VERSION, sessionId: terminal.sessionId }).phase
-    ).toBe("terminated");
-    expect(replayed.getTurn(queued.turnId).phase).toBe("cancelled");
-    expect(replayed.getTurn(cancelledTurn.turnId).phase).toBe("cancelled");
-    expect(replayed.getTurn(interruptedTurn.turnId).phase).toBe("queued");
-    expect(replayed.getTurn(continuityTurn.turnId).phase).toBe("queued");
-    const newSession = replayed.createSession(command("new"));
-    const newTurn = replayed.submitTurn(turn(newSession.sessionId, "new"));
-    expect(newSession.sessionId).not.toBe(terminal.sessionId);
-    expect(newTurn.turnId).not.toBe(queued.turnId);
+    expect(journal.read().find((event) => event.kind === "attempt_started")?.payload).toMatchObject(
+      {
+        turn: { turnId: accepted.turnId, phase: "running" }
+      }
+    );
+    expect(replayed.getTurn(accepted.turnId)).toMatchObject({
+      phase: "reconciliation",
+      recoveryFacts: ["interrupted_attempt_requires_reconciliation"]
+    });
+    const restarted = new SessionSupervisor(journal, adapter, satisfied, new SequenceIds());
+    expect(restarted.getTurn(accepted.turnId).phase).toBe("reconciliation");
+    const newSession = restarted.createSession(command("new"));
+    const newTurn = restarted.submitTurn(turn(newSession.sessionId, "new"));
+    expect(newSession.sessionId).not.toBe(session.sessionId);
+    expect(newTurn.turnId).not.toBe(accepted.turnId);
+  });
+
+  it("preserves a generated continuity-degraded safe fallback across replay", async () => {
+    let calls = 0;
+    const journal = new InMemorySessionJournal();
+    const source = new SessionSupervisor(
+      journal,
+      {
+        async runTurn() {
+          calls += 1;
+          if (calls === 1)
+            return {
+              conversation: { adapterKind: "test", adapterVersion: "1", backendThreadRef: "old" }
+            };
+          if (calls === 2) throw new MissingBackendThreadError();
+          return new Promise<RuntimeResult>(() => undefined);
+        }
+      },
+      satisfied,
+      new SequenceIds()
+    );
+    const session = source.createSession(command("continuity"));
+    source.submitTurn(turn(session.sessionId, "seed"));
+    await settle();
+    const fallback = source.submitTurn(turn(session.sessionId, "fallback"));
+    await settle();
+    await settle();
+    const degraded = journal.read().find((event) => event.kind === "continuity_degraded");
+    if (!degraded) throw new Error("missing continuity_degraded event");
+    const replayJournal = new ReplayJournal(
+      journal.read().filter((event) => event.cursor <= degraded.cursor)
+    );
+    const adapter = new ControlledAdapter();
+    const replayed = new SessionSupervisor(replayJournal, adapter, satisfied, new SequenceIds());
+    expect(replayed.getTurn(fallback.turnId)).toMatchObject({
+      phase: "queued",
+      recoveryFacts: ["backend_thread_missing_fresh_adapter_attempt"]
+    });
+    const secondRestart = new SessionSupervisor(
+      replayJournal,
+      adapter,
+      satisfied,
+      new SequenceIds()
+    );
+    expect(secondRestart.getTurn(fallback.turnId).phase).toBe("queued");
+    replayed.resumeSession({ version: AGENTD_PROTOCOL_VERSION, sessionId: session.sessionId });
+    await settle();
+    expect(adapter.inputs).toHaveLength(1);
+    adapter.complete(0, "replacement");
+    await settle();
+    expect(replayed.getTurn(fallback.turnId).phase).toBe("completed");
+  });
+
+  it("resumes only queued work and leaves cancelled and terminated work inert", async () => {
+    const activeSession: SessionStatus = {
+      version: AGENTD_PROTOCOL_VERSION,
+      sessionId: "active-session",
+      coordinatorBinding: "coordinator",
+      authorityBinding: "authority",
+      workspace: { workspaceRef: "active" },
+      phase: "active",
+      turnIds: ["queued-turn", "cancelled-turn"],
+      nextCursor: 1
+    };
+    const terminatedSession: SessionStatus = {
+      ...activeSession,
+      sessionId: "terminated-session",
+      workspace: { workspaceRef: "terminated" },
+      phase: "terminated",
+      turnIds: ["terminated-turn"]
+    };
+    const storedTurn = (
+      turnId: string,
+      sessionId: string,
+      phase: TurnStatus["phase"]
+    ): TurnStatus => ({
+      turnId,
+      sessionId,
+      prompt: turnId,
+      idempotencyKey: turnId,
+      phase,
+      attemptIds: [],
+      recoveryFacts: [],
+      continuationDepth: 0
+    });
+    const queued = storedTurn("queued-turn", activeSession.sessionId, "queued");
+    const cancelled = storedTurn("cancelled-turn", activeSession.sessionId, "cancelled");
+    const terminated = storedTurn("terminated-turn", terminatedSession.sessionId, "queued");
+    const events: AgentdEvent[] = [
+      {
+        version: AGENTD_PROTOCOL_VERSION,
+        cursor: 1,
+        kind: "session_created",
+        sessionId: activeSession.sessionId,
+        payload: { session: activeSession }
+      } as AgentdEvent,
+      {
+        version: AGENTD_PROTOCOL_VERSION,
+        cursor: 2,
+        kind: "turn_enqueued",
+        sessionId: activeSession.sessionId,
+        turnId: queued.turnId,
+        payload: { turn: queued }
+      } as AgentdEvent,
+      {
+        version: AGENTD_PROTOCOL_VERSION,
+        cursor: 3,
+        kind: "turn_enqueued",
+        sessionId: activeSession.sessionId,
+        turnId: cancelled.turnId,
+        payload: { turn: cancelled }
+      } as AgentdEvent,
+      {
+        version: AGENTD_PROTOCOL_VERSION,
+        cursor: 4,
+        kind: "turn_cancelled",
+        sessionId: activeSession.sessionId,
+        turnId: cancelled.turnId,
+        payload: { turn: cancelled }
+      } as AgentdEvent,
+      {
+        version: AGENTD_PROTOCOL_VERSION,
+        cursor: 5,
+        kind: "session_created",
+        sessionId: terminatedSession.sessionId,
+        payload: { session: terminatedSession }
+      } as AgentdEvent,
+      {
+        version: AGENTD_PROTOCOL_VERSION,
+        cursor: 6,
+        kind: "turn_enqueued",
+        sessionId: terminatedSession.sessionId,
+        turnId: terminated.turnId,
+        payload: { turn: terminated }
+      } as AgentdEvent,
+      {
+        version: AGENTD_PROTOCOL_VERSION,
+        cursor: 7,
+        kind: "session_terminated",
+        sessionId: terminatedSession.sessionId,
+        payload: {}
+      } as AgentdEvent
+    ];
+    const adapter = new ControlledAdapter();
+    const supervisor = new SessionSupervisor(
+      new ReplayJournal(events),
+      adapter,
+      satisfied,
+      new SequenceIds()
+    );
+    supervisor.resumeSession({
+      version: AGENTD_PROTOCOL_VERSION,
+      sessionId: activeSession.sessionId
+    });
+    await settle();
+    expect(adapter.inputs.map((input) => input.turn.turnId)).toEqual([queued.turnId]);
+    expect(() =>
+      supervisor.resumeSession({
+        version: AGENTD_PROTOCOL_VERSION,
+        sessionId: terminatedSession.sessionId
+      })
+    ).toThrow("terminated session cannot resume");
+    expect(supervisor.getTurn(cancelled.turnId).phase).toBe("cancelled");
+    expect(supervisor.getTurn(terminated.turnId).phase).toBe("queued");
   });
 
   it("makes cancellation and termination win late runtime results and never starts terminated queued work", async () => {
@@ -388,5 +556,21 @@ describe("session supervisor spike", () => {
     await settle();
     expect(adapter.inputs).toHaveLength(3);
     expect(adapter.inputs[2]?.session.workspace.workspaceRef).toBe("c");
+  });
+
+  it("rejects invalid finite session concurrency limits", () => {
+    const journal = new InMemorySessionJournal();
+    for (const limit of [0, -1, 1.5, Number.NaN])
+      expect(
+        () =>
+          new SessionSupervisor(
+            journal,
+            new ControlledAdapter(),
+            satisfied,
+            new SequenceIds(),
+            1,
+            limit
+          )
+      ).toThrow("maxConcurrentSessions must be a positive integer or Infinity");
   });
 });
