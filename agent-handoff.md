@@ -445,3 +445,11 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 - Replaced fixed sleeps with interruptible event notification so requested terminal/stale states wake immediately while activity is coalesced.
 - Added compact-by-default wait snapshots, `nextEventSeq`, and `wakeReason`; updated MCP and Fleet skill guidance.
 - Added regression coverage for heartbeat/telemetry coalescing, timeout, terminal interruption, material-event filtering, compatibility behavior, cursors, and snapshot detail.
+
+## 2026-07-13 Forced Clean Worktree Release
+
+### Did
+
+- Kept the safety gate that blocks cleanup when Git reports tracked or untracked changes.
+- Moved ignored build-cache cleanup fully into the daemon: normalize owner-write permissions, run `git clean -ffdx`, and force-remove the verified-clean worktree.
+- Added regression coverage for read-only ignored caches and for preserving dirty worktrees unchanged.
