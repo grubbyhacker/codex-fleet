@@ -19,6 +19,8 @@ This document is the architecture walkthrough for preparing codex-fleet for publ
 
 The architecture is centered on one durable daemon process with multiple stateless frontends.
 
+The non-production extraction spike lives in [packages/session-supervisor/src/index.ts](../packages/session-supervisor/src/index.ts). It is intentionally outside the daemon API/runtime and documents a backend-neutral `agentd/v1` session/event protocol for future evaluation.
+
 ## 2) Public contract and message flow
 
 ### 2.1 API methods
