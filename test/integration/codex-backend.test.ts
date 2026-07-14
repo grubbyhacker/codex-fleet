@@ -214,6 +214,47 @@ describe("codex worker backend", () => {
     expect(args["developer-instructions"]).toContain("return partial findings");
   });
 
+  it("inhibits broad private filesystem discovery for shell and repo workers", () => {
+    const shellArgs = codexWorkerToolArguments(
+      {
+        taskId: "task-shell-discovery",
+        shellPath: "/tmp/codex-fleet-shell/task-shell-discovery",
+        request: {
+          target: { shell: true },
+          deliveryMode: "research_only",
+          risk: "standard",
+          prompt: "Locate the service checkout"
+        }
+      },
+      "/tmp/codex-fleet-shell/task-shell-discovery"
+    );
+    const repoArgs = codexWorkerToolArguments(
+      {
+        taskId: "task-repo-discovery",
+        worktreePath: "/tmp/codex-fleet-worktrees/service/task-repo-discovery",
+        request: {
+          target: { repo: "service" },
+          deliveryMode: "patch",
+          risk: "standard",
+          prompt: "Fix the service"
+        }
+      },
+      "/tmp/codex-fleet-worktrees/service/task-repo-discovery"
+    );
+
+    for (const args of [shellArgs, repoArgs]) {
+      expect(args["developer-instructions"]).toContain("Private filesystem discovery guardrail");
+      expect(args["developer-instructions"]).toContain(
+        "Do not run find, rg, du, ls -R, or equivalent recursive traversal rooted at /, /Users, $HOME, or ~"
+      );
+      expect(args["developer-instructions"]).toContain("trigger macOS privacy prompts");
+      expect(args["developer-instructions"]).toContain("block an unattended task");
+      expect(args["developer-instructions"]).toContain(
+        "check only likely task-specific roots with a shallow explicit depth"
+      );
+    }
+  });
+
   it("refuses push-to-main semantics for shell workers", () => {
     const args = codexWorkerToolArguments(
       {
