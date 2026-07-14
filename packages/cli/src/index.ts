@@ -14,6 +14,17 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+const launchAgentEnvironmentKeys = [
+  "PATH",
+  "CODEX_FLEET_STATE_DIR",
+  "CODEX_FLEET_WORKER_BACKEND",
+  "CODEX_FLEET_CODEX_MODEL",
+  "CODEX_FLEET_CODEX_COMMAND",
+  "CODEX_FLEET_CODEX_TIMEOUT_MS",
+  "CODEX_FLEET_AVAILABLE_MODEL_TIERS",
+  "CODEX_FLEET_AGENT_INFRA_ROOT"
+] as const;
+
 export function cliProbe(): { ok: true; command: string } {
   return { ok: true, command: "codex-fleet" };
 }
@@ -381,10 +392,10 @@ function isTerminal(state: TaskSnapshot["state"]): boolean {
   return ["exited", "failed_to_start", "cancelled", "timed_out"].includes(state);
 }
 
-export function renderLaunchAgentPlist(): string {
+export function renderLaunchAgentPlist(persistedEnvironment: Record<string, string> = {}): string {
   const paths = resolveFleetPaths();
   const daemonPath = launchAgentDaemonPath();
-  const envVars = launchAgentEnvironment();
+  const envVars = launchAgentEnvironment(persistedEnvironment);
   const env =
     envVars.length > 0
       ? `
@@ -432,7 +443,11 @@ function launchAgentDaemonPath(): string {
   );
 }
 
-function launchAgentEnvironment(): Array<[string, string]> {
+export function launchAgentEnvironment(
+  persistedEnvironment: Record<string, string> = {},
+  environment: NodeJS.ProcessEnv = process.env,
+  codexCandidates = defaultLaunchAgentCodexCandidates()
+): Array<[string, string]> {
   const defaults = new Map<string, string>([
     [
       "PATH",
@@ -447,32 +462,70 @@ function launchAgentEnvironment(): Array<[string, string]> {
       ].join(":")
     ],
     ["CODEX_FLEET_WORKER_BACKEND", "codex"],
-    ["CODEX_FLEET_CODEX_COMMAND", "/Applications/Codex.app/Contents/Resources/codex"]
+    ["CODEX_FLEET_CODEX_COMMAND", resolveLaunchAgentCodexCommand(codexCandidates)]
   ]);
-  for (const [key, value] of Object.entries(process.env)) {
+  for (const key of launchAgentEnvironmentKeys) {
+    const value = persistedEnvironment[key];
+    if (value && (key !== "CODEX_FLEET_CODEX_COMMAND" || usableCodexCommand(value))) {
+      defaults.set(key, value);
+    }
+  }
+  for (const [key, value] of Object.entries(environment)) {
     if (value && key !== "PATH") {
       defaults.set(key, value);
     }
   }
-  return [
-    "PATH",
-    "CODEX_FLEET_STATE_DIR",
-    "CODEX_FLEET_WORKER_BACKEND",
-    "CODEX_FLEET_CODEX_MODEL",
-    "CODEX_FLEET_CODEX_COMMAND",
-    "CODEX_FLEET_CODEX_TIMEOUT_MS",
-    "CODEX_FLEET_AVAILABLE_MODEL_TIERS",
-    "CODEX_FLEET_AGENT_INFRA_ROOT"
-  ].flatMap((key) => {
+  return launchAgentEnvironmentKeys.flatMap((key) => {
     const value = defaults.get(key);
     return value ? [[key, value]] : [];
   });
 }
 
+export function resolveLaunchAgentCodexCommand(candidates: string[]): string {
+  return candidates.find((candidate) => usableCodexCommand(candidate)) ?? "codex";
+}
+
+function defaultLaunchAgentCodexCandidates(): string[] {
+  return [
+    join(homedir(), ".local", "bin", "codex"),
+    "/Applications/Codex.app/Contents/Resources/codex"
+  ];
+}
+
+function usableCodexCommand(command: string): boolean {
+  return !command.includes("/") || existsSync(command);
+}
+
+function persistedLaunchAgentEnvironment(plistPath: string): Record<string, string> {
+  if (!existsSync(plistPath) || process.platform !== "darwin") {
+    return {};
+  }
+  try {
+    const output = execFileSync(
+      "/usr/bin/plutil",
+      ["-extract", "EnvironmentVariables", "json", "-o", "-", plistPath],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    );
+    const parsed = JSON.parse(output) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string"
+      )
+    );
+  } catch {
+    return {};
+  }
+}
+
 function installLaunchAgent(): { installed: true; plistPath: string; daemonPath: string } {
   const plistPath = launchAgentPath();
   mkdirSync(dirname(plistPath), { recursive: true });
-  writeFileSync(plistPath, renderLaunchAgentPlist(), { mode: 0o644 });
+  writeFileSync(plistPath, renderLaunchAgentPlist(persistedLaunchAgentEnvironment(plistPath)), {
+    mode: 0o644
+  });
   return { installed: true, plistPath, daemonPath: launchAgentDaemonPath() };
 }
 
