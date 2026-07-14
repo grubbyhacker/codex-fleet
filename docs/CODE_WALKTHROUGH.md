@@ -261,8 +261,9 @@ MCP Tool / CLI / TUI -> callDaemon -> TCP/Unix socket -> rpc/server.ts -> servic
   - visible tasks, selected task detail, events pane
   - action queue derived from terminal tasks with retained worktrees.
 - Core render path: `loadDashboardData` + `renderDashboard` + `renderDashboardForOpenTui` in [packages/tui/src/index.ts](../packages/tui/src/index.ts).
+- Local Codex usage accounting streams timestamped rollout token deltas in [packages/tui/src/codex-usage.ts](../packages/tui/src/codex-usage.ts), preserving cached/uncached input, output, reasoning, and per-turn model attribution without loading conversation content into the dashboard.
 - Live refresh defaults to five seconds and caches selected-task detail/history while the selected compact row is unchanged.
-- Coverage: [test/integration/tui.test.ts](../test/integration/tui.test.ts).
+- Coverage: [test/integration/tui.test.ts](../test/integration/tui.test.ts) and [test/integration/codex-usage.test.ts](../test/integration/codex-usage.test.ts).
 
 ## 12) Test strategy and confidence map
 

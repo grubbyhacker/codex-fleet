@@ -200,7 +200,13 @@ describe("tui dashboard", () => {
 
     expect(output.rendered).toContain("Codex Fleet");
     expect(output.rendered).toContain("CODEX FLEET");
-    expect(output.rendered).toContain("Codex tokens: today 245k | week 1.9M | month 5.7M");
+    expect(output.rendered).toContain(
+      "Codex raw tokens: today 245k (18 calls) | week 1.9M | month 5.7M"
+    );
+    expect(output.rendered).toContain(
+      "Today mix: input 220k | input-cache 95.5% | fresh 10k | output 21k"
+    );
+    expect(output.rendered).toContain("Today models: 5.6-sol 180k | 5.6-terra 65k");
     expect(output.rendered).toContain("FOCUS: TASKS");
     expect(output.rendered).toContain("NAV: h/l/e focus");
     expect(output.rendered).toContain("VIEW: o overview");

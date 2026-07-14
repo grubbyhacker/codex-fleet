@@ -453,3 +453,12 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 - Kept the safety gate that blocks cleanup when Git reports tracked or untracked changes.
 - Moved ignored build-cache cleanup fully into the daemon: normalize owner-write permissions, run `git clean -ffdx`, and force-remove the verified-clean worktree.
 - Added regression coverage for read-only ignored caches and for preserving dirty worktrees unchanged.
+
+## 2026-07-13 Accurate Token Usage Breakdown
+
+### Did
+
+- Added `DCR-0015` and replaced recently-updated thread lifetime sums with timestamped rollout `last_token_usage` accounting.
+- Added persistent raw-token, call-count, cached-versus-fresh input, output/reasoning, and per-turn model breakdowns to the TUI.
+- Streamed only candidate rollout files and retained the one-minute usage cache so conversation content is not loaded into dashboard state.
+- Added regression coverage for reporting windows, partial/malformed rollouts, total-only usage, missing files, and model switches within a conversation.
