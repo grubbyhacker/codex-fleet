@@ -11,6 +11,12 @@ import {
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import {
+  readLocalCodexUsage,
+  type CodexTokenBreakdown,
+  type CodexUsageSummary
+} from "./codex-usage.js";
+
 type DashboardData = {
   tasks: TaskSnapshot[];
   histories: Record<string, Event[]>;
@@ -46,13 +52,6 @@ type DashboardView = {
   taskLines: string[];
   detailLines: string[];
   eventLines: string[];
-};
-
-type CodexUsageSummary = {
-  daily: number | undefined;
-  weekly: number | undefined;
-  monthly: number | undefined;
-  source: "local" | "unavailable";
 };
 
 const terminalStates = new Set<TaskState>(["exited", "failed_to_start", "cancelled", "timed_out"]);
@@ -169,7 +168,9 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
       .filter((part): part is string => Boolean(part))
       .join(" | ")
   );
-  headerLines.push(`Codex tokens: ${formatCodexUsage(data.codexUsage)}`);
+  headerLines.push(`Codex raw tokens: ${formatCodexUsagePeriods(data.codexUsage)}`);
+  headerLines.push(`Today mix: ${formatCodexUsageMix(data.codexUsage?.daily)}`);
+  headerLines.push(`Today models: ${formatCodexModelUsage(data.codexUsage)}`);
   headerLines.push(`FOCUS: ${formatFocus(options.focus ?? "tasks")}`);
   headerLines.push(
     "NAV: h/l/e focus | j/k/up/down move or scroll | PgUp/PgDn jump | g/G first/last"
@@ -633,7 +634,7 @@ async function loadDashboardData(
   const listed = (await callDaemon(rpc, "list_tasks", {})) as { tasks: TaskSnapshot[] };
   let tasks = listed.tasks;
   const histories: Record<string, Event[]> = {};
-  const [collectedAt, codexUsage] = [new Date().toISOString(), loadCodexUsage()];
+  const [collectedAt, codexUsage] = [new Date().toISOString(), await loadCodexUsage()];
   const selected = selectTask(
     tasks,
     selectVisibleTasks(tasks, Date.parse(collectedAt), options).tasks,
@@ -809,10 +810,14 @@ function demoDashboardData(): DashboardData {
   );
   return {
     codexUsage: {
-      daily: 245_000,
-      monthly: 5_740_000,
+      daily: demoTokenBreakdown(245_000, 18, 210_000, 220_000, 21_000, 4_000),
+      dailyModels: [
+        { model: "gpt-5.6-sol", total: 180_000 },
+        { model: "gpt-5.6-terra", total: 65_000 }
+      ],
+      monthly: demoTokenBreakdown(5_740_000, 420, 4_900_000, 5_200_000, 510_000, 90_000),
       source: "local",
-      weekly: 1_920_000
+      weekly: demoTokenBreakdown(1_920_000, 140, 1_640_000, 1_730_000, 170_000, 30_000)
     },
     collectedAt: collectedAt.toISOString(),
     histories,
@@ -820,80 +825,18 @@ function demoDashboardData(): DashboardData {
   };
 }
 
-function loadCodexUsage(now = new Date()): CodexUsageSummary {
+async function loadCodexUsage(now = new Date()): Promise<CodexUsageSummary> {
   const current = Date.now();
   if (cachedCodexUsage && cachedCodexUsage.expiresAt > current) {
     return cachedCodexUsage.summary;
   }
 
-  const summary = readCodexUsage(now);
+  const summary = await readLocalCodexUsage(now);
   cachedCodexUsage = {
     expiresAt: current + 60_000,
     summary
   };
   return summary;
-}
-
-function readCodexUsage(now: Date): CodexUsageSummary {
-  const dbPath = codexStateDbPath();
-  if (!dbPath) {
-    return unavailableCodexUsage();
-  }
-
-  const starts = [startOfLocalDay(now), startOfLocalWeek(now), startOfLocalMonth(now)].map((date) =>
-    Math.floor(date.getTime() / 1_000)
-  );
-  const query = `
-    select
-      coalesce(sum(case when updated_at >= ${starts[0]} then tokens_used else 0 end), 0),
-      coalesce(sum(case when updated_at >= ${starts[1]} then tokens_used else 0 end), 0),
-      coalesce(sum(case when updated_at >= ${starts[2]} then tokens_used else 0 end), 0)
-    from threads;
-  `;
-  const proc = Bun.spawnSync(["sqlite3", dbPath, query], {
-    stderr: "pipe",
-    stdout: "pipe"
-  });
-  if (proc.exitCode !== 0) {
-    return unavailableCodexUsage();
-  }
-
-  const [daily, weekly, monthly] = proc.stdout
-    .toString()
-    .trim()
-    .split("|")
-    .map((value) => Number.parseInt(value, 10));
-  if (daily === undefined || weekly === undefined || monthly === undefined) {
-    return unavailableCodexUsage();
-  }
-  if (![daily, weekly, monthly].every((value) => Number.isFinite(value) && value >= 0)) {
-    return unavailableCodexUsage();
-  }
-  return { daily, monthly, source: "local", weekly };
-}
-
-function codexStateDbPath(): string | undefined {
-  const home = process.env.CODEX_HOME ?? `${process.env.HOME ?? ""}/.codex`;
-  const candidates = [`${home}/state_5.sqlite`, `${home}/sqlite/state_5.sqlite`];
-  return candidates.find((candidate) => existsSync(candidate));
-}
-
-function unavailableCodexUsage(): CodexUsageSummary {
-  return { daily: undefined, monthly: undefined, source: "unavailable", weekly: undefined };
-}
-
-function startOfLocalDay(value: Date): Date {
-  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
-}
-
-function startOfLocalWeek(value: Date): Date {
-  const day = value.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  return new Date(value.getFullYear(), value.getMonth(), value.getDate() + mondayOffset);
-}
-
-function startOfLocalMonth(value: Date): Date {
-  return new Date(value.getFullYear(), value.getMonth(), 1);
 }
 
 function demoEvent(taskId: string, seq: number, ts: string, type: string, summary: string): Event {
@@ -1785,20 +1728,59 @@ function formatDuration(ms: number | undefined): string {
   return `${Math.round(ms / 1_000)}s`;
 }
 
-function formatCodexUsage(summary: CodexUsageSummary | undefined): string {
+function formatCodexUsagePeriods(summary: CodexUsageSummary | undefined): string {
   if (!summary || summary.source === "unavailable") {
     return "today n/a | week n/a | month n/a";
   }
   return [
-    `today ${formatTokenCount(summary.daily)}`,
-    `week ${formatTokenCount(summary.weekly)}`,
-    `month ${formatTokenCount(summary.monthly)}`
+    `today ${formatTokenCount(summary.daily?.total)} (${formatTokenCount(summary.daily?.calls)} calls)`,
+    `week ${formatTokenCount(summary.weekly?.total)}`,
+    `month ${formatTokenCount(summary.monthly?.total)}`
   ].join(" | ");
+}
+
+function formatCodexUsageMix(value: CodexTokenBreakdown | undefined): string {
+  if (!value) {
+    return "input n/a | input-cache n/a | fresh n/a | output n/a | reasoning n/a";
+  }
+  const cacheRatio =
+    value.input > 0 ? `${formatPercentage((value.cachedInput / value.input) * 100)}%` : "n/a";
+  return [
+    `input ${formatTokenCount(value.input)}`,
+    `input-cache ${cacheRatio}`,
+    `fresh ${formatTokenCount(value.uncachedInput)}`,
+    `output ${formatTokenCount(value.output)}`,
+    `reasoning ${formatTokenCount(value.reasoningOutput)}`,
+    value.unclassified > 0 ? `unclassified ${formatTokenCount(value.unclassified)}` : undefined
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" | ");
+}
+
+function formatCodexModelUsage(summary: CodexUsageSummary | undefined): string {
+  if (!summary || summary.source === "unavailable" || summary.dailyModels.length === 0) {
+    return "n/a";
+  }
+  const visible = summary.dailyModels.slice(0, 4);
+  const remainder = summary.dailyModels.slice(4).reduce((total, item) => total + item.total, 0);
+  return [
+    ...visible.map((item) => `${shortModelName(item.model)} ${formatTokenCount(item.total)}`),
+    remainder > 0 ? `other ${formatTokenCount(remainder)}` : undefined
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" | ");
+}
+
+function shortModelName(model: string): string {
+  return model.replace(/^gpt-/, "").replace(/^codex-/, "");
 }
 
 function formatTokenCount(value: number | undefined): string {
   if (value === undefined) {
     return "n/a";
+  }
+  if (value >= 1_000_000_000) {
+    return `${trimFixed(value / 1_000_000_000)}B`;
   }
   if (value >= 1_000_000) {
     return `${trimFixed(value / 1_000_000)}M`;
@@ -1809,8 +1791,32 @@ function formatTokenCount(value: number | undefined): string {
   return String(value);
 }
 
+function demoTokenBreakdown(
+  total: number,
+  calls: number,
+  cachedInput: number,
+  input: number,
+  output: number,
+  reasoningOutput: number
+): CodexTokenBreakdown {
+  return {
+    cachedInput,
+    calls,
+    input,
+    output,
+    reasoningOutput,
+    total,
+    unclassified: Math.max(0, total - input - output),
+    uncachedInput: Math.max(0, input - cachedInput)
+  };
+}
+
 function trimFixed(value: number): string {
   return value.toFixed(value >= 10 ? 0 : 1).replace(/\.0$/, "");
+}
+
+function formatPercentage(value: number): string {
+  return value.toFixed(1).replace(/\.0$/, "");
 }
 
 function formatLocalTimestamp(value: string): string {
