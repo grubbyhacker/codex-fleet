@@ -23,7 +23,20 @@ describe("agentd session-supervisor protocol schemas", () => {
         version: AGENTD_PROTOCOL_VERSION,
         cursor: 1,
         kind: "turn_enqueued",
-        sessionId: "session-1"
+        sessionId: "session-1",
+        turnId: "turn-1",
+        payload: {
+          turn: {
+            turnId: "turn-1",
+            sessionId: "session-1",
+            prompt: "work",
+            idempotencyKey: "key-1",
+            phase: "queued",
+            attemptIds: [],
+            recoveryFacts: [],
+            continuationDepth: 0
+          }
+        }
       }).cursor
     ).toBe(1);
     expect(

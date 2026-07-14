@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 const runnable = process.platform === "linux" && process.getuid?.() === 0;
 
 describe.skipIf(!runnable)("Linux test-only per-session UID/GID isolation proof", () => {
-  it("denies a different session identity traversal into a 0700 workspace", () => {
+  it("denies a different session identity read, write, and traversal into a 0700 workspace", () => {
     const root = mkdtempSync(join(tmpdir(), "agentd-uid-proof-"));
     const firstUid = 41_001;
     const secondUid = 41_002;
@@ -40,9 +40,13 @@ describe.skipIf(!runnable)("Linux test-only per-session UID/GID isolation proof"
           secret
         ]);
       const own = asSession(firstUid, 'test -r "$1"');
-      const cross = asSession(secondUid, 'test ! -r "$1"');
+      const crossRead = asSession(secondUid, 'test ! -r "$1"');
+      const crossWrite = asSession(secondUid, 'test ! -w "$1"');
+      const crossTraverse = asSession(secondUid, 'test ! -x "$(dirname "$1")"');
       expect(own.status).toBe(0);
-      expect(cross.status).toBe(0);
+      expect(crossRead.status).toBe(0);
+      expect(crossWrite.status).toBe(0);
+      expect(crossTraverse.status).toBe(0);
     } finally {
       rmSync(root, { force: true, recursive: true });
     }

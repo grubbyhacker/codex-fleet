@@ -56,6 +56,13 @@
         "zod": "4.4.3",
       },
     },
+    "packages/session-supervisor": {
+      "name": "@codex-fleet/session-supervisor",
+      "version": "0.0.0",
+      "dependencies": {
+        "zod": "4.4.3",
+      },
+    },
     "packages/shared": {
       "name": "@codex-fleet/shared",
       "version": "0.0.0",
@@ -82,6 +89,8 @@
     "@codex-fleet/daemon": ["@codex-fleet/daemon@workspace:packages/daemon"],
 
     "@codex-fleet/mcp-adapter": ["@codex-fleet/mcp-adapter@workspace:packages/mcp-adapter"],
+
+    "@codex-fleet/session-supervisor": ["@codex-fleet/session-supervisor@workspace:packages/session-supervisor"],
 
     "@codex-fleet/shared": ["@codex-fleet/shared@workspace:packages/shared"],
 

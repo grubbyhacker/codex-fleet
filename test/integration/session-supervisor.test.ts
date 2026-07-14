@@ -165,6 +165,15 @@ describe("session supervisor spike", () => {
         .conversation?.backendThreadRef
     ).toBe("replacement");
     expect(journal.read().filter((event) => event.kind === "continuity_degraded")).toHaveLength(1);
+    const replayed = new SessionSupervisor(journal, adapter, satisfied, new SequenceIds());
+    expect(replayed.getTurn(continued.turnId)).toMatchObject({
+      phase: "completed",
+      recoveryFacts: ["backend_thread_missing_fresh_adapter_attempt"]
+    });
+    expect(
+      replayed.getStatus({ version: AGENTD_PROTOCOL_VERSION, sessionId: session.sessionId })
+        .conversation?.backendThreadRef
+    ).toBe("replacement");
   });
 
   it("never loops when the fresh fallback is also missing", async () => {
@@ -243,8 +252,19 @@ describe("session supervisor spike", () => {
     await settle();
     expect(supervisor.getTurn(accepted.turnId)).toMatchObject({
       phase: "completed",
-      verifierState: "satisfied",
-      attemptIds: ["attempt-3", "attempt-4"]
+      verifierState: "continue",
+      attemptIds: ["attempt-3"]
+    });
+    const continuation = journal.read().find((event) => event.kind === "verifier_continuation");
+    expect(continuation?.payload.continuationTurn).toMatchObject({
+      parentTurnId: accepted.turnId,
+      prompt: "Continue the prior turn after verifier feedback: retry once",
+      phase: "queued"
+    });
+    if (continuation?.kind !== "verifier_continuation") throw new Error("missing continuation");
+    expect(supervisor.getTurn(continuation.payload.continuationTurn.turnId)).toMatchObject({
+      phase: "completed",
+      verifierState: "satisfied"
     });
     expect(journal.read().some((event) => event.kind === "verifier_continuation")).toBe(true);
     const escalated = new SessionSupervisor(
@@ -265,5 +285,108 @@ describe("session supervisor spike", () => {
       phase: "failed",
       verifierState: "escalated"
     });
+  });
+
+  it("replays terminal, cancelled, reconciliation, and continuity-degraded state and avoids reset ID collisions", async () => {
+    const journal = new InMemorySessionJournal();
+    const adapter = new ControlledAdapter();
+    const supervisor = new SessionSupervisor(journal, adapter, satisfied, new SequenceIds());
+    const terminal = supervisor.createSession(command("terminal"));
+    const cancelled = supervisor.createSession(command("cancelled"));
+    const interrupted = supervisor.createSession(command("interrupted"));
+    const continuity = supervisor.createSession(command("continuity"));
+    const queued = supervisor.submitTurn(turn(terminal.sessionId, "queued"));
+    supervisor.terminateSession({
+      version: AGENTD_PROTOCOL_VERSION,
+      sessionId: terminal.sessionId
+    });
+    const cancelledTurn = supervisor.submitTurn(turn(cancelled.sessionId, "cancel"));
+    await settle();
+    await supervisor.cancelTurn({
+      version: AGENTD_PROTOCOL_VERSION,
+      sessionId: cancelled.sessionId,
+      turnId: cancelledTurn.turnId
+    });
+    const interruptedTurn = supervisor.submitTurn(turn(interrupted.sessionId, "broken"));
+    const continuityTurn = supervisor.submitTurn(turn(continuity.sessionId, "missing"));
+    await settle();
+    const replayed = new SessionSupervisor(
+      journal,
+      {
+        async runTurn() {
+          throw new Error("must not replay");
+        }
+      },
+      satisfied,
+      new SequenceIds()
+    );
+    expect(
+      replayed.getStatus({ version: AGENTD_PROTOCOL_VERSION, sessionId: terminal.sessionId }).phase
+    ).toBe("terminated");
+    expect(replayed.getTurn(queued.turnId).phase).toBe("cancelled");
+    expect(replayed.getTurn(cancelledTurn.turnId).phase).toBe("cancelled");
+    expect(replayed.getTurn(interruptedTurn.turnId).phase).toBe("queued");
+    expect(replayed.getTurn(continuityTurn.turnId).phase).toBe("queued");
+    const newSession = replayed.createSession(command("new"));
+    const newTurn = replayed.submitTurn(turn(newSession.sessionId, "new"));
+    expect(newSession.sessionId).not.toBe(terminal.sessionId);
+    expect(newTurn.turnId).not.toBe(queued.turnId);
+  });
+
+  it("makes cancellation and termination win late runtime results and never starts terminated queued work", async () => {
+    const adapter = new ControlledAdapter();
+    const supervisor = new SessionSupervisor(
+      new InMemorySessionJournal(),
+      adapter,
+      satisfied,
+      new SequenceIds(),
+      1,
+      1
+    );
+    const session = supervisor.createSession(command("race"));
+    const first = supervisor.submitTurn(turn(session.sessionId, "first"));
+    const second = supervisor.submitTurn(turn(session.sessionId, "second"));
+    await settle();
+    await supervisor.cancelTurn({
+      version: AGENTD_PROTOCOL_VERSION,
+      sessionId: session.sessionId,
+      turnId: first.turnId
+    });
+    adapter.complete(0, "late-cancelled");
+    await settle();
+    expect(supervisor.getTurn(first.turnId).phase).toBe("cancelled");
+    expect(adapter.inputs).toHaveLength(2);
+    supervisor.terminateSession({ version: AGENTD_PROTOCOL_VERSION, sessionId: session.sessionId });
+    adapter.complete(1, "late-terminated");
+    await settle();
+    expect(supervisor.getTurn(second.turnId).phase).toBe("cancelled");
+    expect(
+      supervisor.getStatus({ version: AGENTD_PROTOCOL_VERSION, sessionId: session.sessionId })
+        .conversation
+    ).toBeUndefined();
+  });
+
+  it("bounds cross-session workers fairly while retaining one active turn per session", async () => {
+    const adapter = new ControlledAdapter();
+    const supervisor = new SessionSupervisor(
+      new InMemorySessionJournal(),
+      adapter,
+      satisfied,
+      new SequenceIds(),
+      1,
+      2
+    );
+    const sessions = ["a", "b", "c"].map((name) => supervisor.createSession(command(name)));
+    sessions.forEach((session) =>
+      supervisor.submitTurn(turn(session.sessionId, session.sessionId))
+    );
+    await settle();
+    expect(adapter.inputs).toHaveLength(2);
+    adapter.complete(0);
+    adapter.complete(1);
+    await settle();
+    await settle();
+    expect(adapter.inputs).toHaveLength(3);
+    expect(adapter.inputs[2]?.session.workspace.workspaceRef).toBe("c");
   });
 });
