@@ -471,3 +471,13 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 - Preserved recognized environment settings from an existing LaunchAgent plist across binary redeploys while discarding a persisted Codex path that no longer exists.
 - Added regression coverage for installed-command fallback and persisted repository-catalog environment settings.
 - Verified the live fix with a real Luna worker launch and clean terminal response.
+
+## 2026-07-14 Installed-Daemon Deployment Smoke
+
+### Did
+
+- Made `deploy:local` run a minimal paid Luna shell worker through the freshly restarted installed daemon by default.
+- Required a successful exit, exact marker response, and the requested Luna route before deployment reports success.
+- Waited for authenticated daemon RPC readiness after launchd restart so process status cannot race socket creation.
+- Released every terminal smoke task automatically and added `--skip-worker-smoke` for intentional exceptions.
+- Added regression coverage for success, delayed RPC readiness, launcher failure, incorrect output, route mismatch, timeout safety, and terminal-task release.

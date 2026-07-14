@@ -125,8 +125,10 @@ mise exec -- bun run deploy:local
 ```
 
 That command checks Fleet task state, builds and installs binaries, installs the
-Fleet skill, restarts only the LaunchAgent daemon, and leaves client-owned MCP
-adapter processes alone.
+Fleet skill, restarts only the LaunchAgent daemon, runs a minimal paid Luna
+worker through the installed daemon, releases the smoke task, and leaves
+client-owned MCP adapter processes alone. Pass `--skip-worker-smoke` only when
+an installed-daemon worker check is intentionally unnecessary.
 
 If you only need to restart the already-installed daemon:
 
