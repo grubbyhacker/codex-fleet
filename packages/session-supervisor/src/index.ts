@@ -112,13 +112,22 @@ const eventPayloads = {
   session_checkpointed: z.object({ checkpointRef: opaqueRef }).strict(),
   session_resumed: z.object({}).strict(),
   session_terminated: z.object({}).strict(),
-  continuity_degraded: z.object({ turn: storedTurnSchema, facts }).strict(),
+  continuity_degraded: z
+    .object({
+      turn: storedTurnSchema,
+      facts,
+      sessionConversation: conversationRefSchema.nullable()
+    })
+    .strict(),
   verifier_evaluated: z
     .object({ turn: storedTurnSchema, outcome: verifierOutcomeSchema, facts })
     .strict(),
+  // This is the atomic terminal transition for a continued source turn. Both snapshots are
+  // required so a crash cannot leave a completed source without its deterministic child.
   verifier_continuation: z
-    .object({ sourceTurnId: id, continuationTurn: storedTurnSchema, facts })
+    .object({ sourceTurn: storedTurnSchema, continuationTurn: storedTurnSchema, facts })
     .strict(),
+  cancellation_failed: z.object({ turn: storedTurnSchema, facts }).strict(),
   verifier_escalated: z.object({ turn: storedTurnSchema, facts }).strict()
 } as const;
 const eventBase = {
@@ -237,13 +246,10 @@ export class SessionSupervisor {
     private readonly verifier: CompletionVerifier,
     private readonly ids: Ids = new SequenceIds(),
     private readonly maxVerifierContinuations = 1,
-    maxConcurrentSessions = Number.POSITIVE_INFINITY
+    maxConcurrentSessions = 1
   ) {
-    if (
-      maxConcurrentSessions !== Number.POSITIVE_INFINITY &&
-      (!Number.isInteger(maxConcurrentSessions) || maxConcurrentSessions <= 0)
-    )
-      throw new RangeError("maxConcurrentSessions must be a positive integer or Infinity");
+    if (!Number.isInteger(maxConcurrentSessions) || maxConcurrentSessions <= 0)
+      throw new RangeError("maxConcurrentSessions must be a positive integer");
     this.maxConcurrentSessions = maxConcurrentSessions;
     this.replay();
   }
@@ -323,8 +329,7 @@ export class SessionSupervisor {
       if (turn.phase === "queued" || turn.phase === "running") {
         turn.phase = "cancelled";
         this.write("turn_cancelled", input.sessionId, turnId, undefined, { turn });
-        if (turnId === session.activeTurnId)
-          void this.runtime.cancelTurn?.(input.sessionId, turnId);
+        if (turnId === session.activeTurnId) this.cancelRuntime(session, turn);
       }
     }
     this.write("session_terminated", input.sessionId, undefined, undefined, {});
@@ -446,7 +451,8 @@ export class SessionSupervisor {
         turn.phase = "queued";
         this.write("continuity_degraded", session.sessionId, turn.turnId, attemptId, {
           turn,
-          facts: turn.recoveryFacts
+          facts: turn.recoveryFacts,
+          sessionConversation: null
         });
         this.markReady(session);
         return;
@@ -498,7 +504,6 @@ export class SessionSupervisor {
       return;
     }
     turn.phase = "completed";
-    this.write("turn_finished", session.sessionId, turn.turnId, attemptId, { turn });
     const continuation = this.newTurn(
       session,
       `Continue the prior turn after verifier feedback: ${verified.facts.join("; ")}`,
@@ -507,7 +512,7 @@ export class SessionSupervisor {
       turn.continuationDepth + 1
     );
     this.write("verifier_continuation", session.sessionId, turn.turnId, attemptId, {
-      sourceTurnId: turn.turnId,
+      sourceTurn: turn,
       continuationTurn: continuation,
       facts: verified.facts
     });
@@ -526,6 +531,7 @@ export class SessionSupervisor {
           this.restoreTurn(event.payload.turn);
           break;
         case "verifier_continuation":
+          this.restoreTurn(event.payload.sourceTurn);
           this.restoreTurn(event.payload.continuationTurn);
           break;
         case "attempt_started":
@@ -536,12 +542,22 @@ export class SessionSupervisor {
           if (session) session.conversation = event.payload.conversation;
           break;
         }
-        case "continuity_degraded":
+        case "continuity_degraded": {
+          const session = this.sessions.get(event.sessionId);
+          if (session) {
+            if (event.payload.sessionConversation)
+              session.conversation = event.payload.sessionConversation;
+            else delete session.conversation;
+          }
+          this.restoreTurn(event.payload.turn);
+          break;
+        }
         case "attempt_interrupted":
         case "turn_cancelled":
         case "turn_finished":
         case "verifier_evaluated":
         case "verifier_escalated":
+        case "cancellation_failed":
           this.restoreTurn(event.payload.turn);
           break;
         case "session_checkpointed": {
@@ -574,6 +590,8 @@ export class SessionSupervisor {
   }
   private restoreTurn(turn: TurnStatus): void {
     const copy = this.copyTurn(turn);
+    this.usedIds.add(copy.turnId);
+    for (const attemptId of copy.attemptIds) this.usedIds.add(attemptId);
     this.turns.set(copy.turnId, copy);
     this.idempotency.set(`${copy.sessionId}:${copy.idempotencyKey}`, copy.turnId);
     const session = this.sessions.get(copy.sessionId);
@@ -603,6 +621,21 @@ export class SessionSupervisor {
     while (this.usedIds.has(value));
     this.usedIds.add(value);
     return value;
+  }
+  private cancelRuntime(session: SessionStatus, turn: TurnStatus): void {
+    if (!this.runtime.cancelTurn) return;
+    void Promise.resolve()
+      .then(() => this.runtime.cancelTurn!(session.sessionId, turn.turnId))
+      .catch(() => {
+        // Deliberately do not surface adapter errors from a terminated session as unhandled
+        // rejections. The durable terminal state remains authoritative.
+        if (!turn.recoveryFacts.includes("runtime_cancel_failed"))
+          turn.recoveryFacts.push("runtime_cancel_failed");
+        this.write("cancellation_failed", session.sessionId, turn.turnId, undefined, {
+          turn,
+          facts: ["runtime_cancel_failed"]
+        });
+      });
   }
   private require(sessionId: string): SessionStatus {
     const session = this.sessions.get(sessionId);

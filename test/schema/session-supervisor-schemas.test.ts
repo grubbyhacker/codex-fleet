@@ -52,4 +52,37 @@ describe("agentd session-supervisor protocol schemas", () => {
       }).version
     ).toBe(AGENTD_PROTOCOL_VERSION);
   });
+
+  it("requires continuity removal and atomic verifier continuation snapshots", () => {
+    const queuedTurn = {
+      turnId: "turn-1",
+      sessionId: "session-1",
+      prompt: "work",
+      idempotencyKey: "key-1",
+      phase: "queued",
+      attemptIds: [],
+      recoveryFacts: [],
+      continuationDepth: 0
+    };
+    expect(
+      agentdEventSchema.parse({
+        version: AGENTD_PROTOCOL_VERSION,
+        cursor: 1,
+        kind: "continuity_degraded",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        payload: { turn: queuedTurn, facts: ["fallback"], sessionConversation: null }
+      }).kind
+    ).toBe("continuity_degraded");
+    expect(() =>
+      agentdEventSchema.parse({
+        version: AGENTD_PROTOCOL_VERSION,
+        cursor: 2,
+        kind: "verifier_continuation",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        payload: { continuationTurn: queuedTurn, facts: ["continue"] }
+      })
+    ).toThrow();
+  });
 });
