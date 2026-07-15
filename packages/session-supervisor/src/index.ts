@@ -111,7 +111,9 @@ const eventPayloads = {
   turn_finished: z.object({ turn: storedTurnSchema }).strict(),
   session_checkpointed: z.object({ checkpointRef: opaqueRef }).strict(),
   session_resumed: z.object({}).strict(),
-  session_terminated: z.object({}).strict(),
+  session_terminated: z
+    .object({ session: storedSessionSchema, turns: z.array(storedTurnSchema) })
+    .strict(),
   continuity_degraded: z
     .object({
       turn: storedTurnSchema,
@@ -128,6 +130,7 @@ const eventPayloads = {
     .object({ sourceTurn: storedTurnSchema, continuationTurn: storedTurnSchema, facts })
     .strict(),
   cancellation_failed: z.object({ turn: storedTurnSchema, facts }).strict(),
+  verifier_failed: z.object({ turn: storedTurnSchema, facts }).strict(),
   verifier_escalated: z.object({ turn: storedTurnSchema, facts }).strict()
 } as const;
 const eventBase = {
@@ -181,6 +184,7 @@ export type SessionStatus = z.infer<typeof sessionStatusSchema>;
 export type TurnStatus = z.infer<typeof storedTurnSchema>;
 
 export interface SessionJournal {
+  /** Atomic contract: return only after durability; throwing means the event was not appended. */
   append(event: JournalEvent): AgentdEvent;
   read(): AgentdEvent[];
 }
@@ -238,6 +242,7 @@ export class SessionSupervisor {
   private readonly usedIds = new Set<string>();
   private readonly running = new Set<string>();
   private readonly ready: string[] = [];
+  private readonly journalBlocked = new Set<string>();
   private draining = false;
   private readonly maxConcurrentSessions: number;
   constructor(
@@ -266,8 +271,7 @@ export class SessionSupervisor {
       turnIds: [],
       nextCursor: 1
     };
-    this.sessions.set(sessionId, session);
-    this.write("session_created", sessionId, undefined, undefined, { session });
+    this.commit("session_created", sessionId, undefined, undefined, { session });
     return this.status(sessionId);
   }
   submitTurn(command: z.input<typeof submitTurnSchema>): TurnStatus {
@@ -276,7 +280,7 @@ export class SessionSupervisor {
     const key = `${input.sessionId}:${input.idempotencyKey}`;
     const existing = this.idempotency.get(key);
     if (existing) return this.copyTurn(this.turn(existing));
-    const created = this.newTurn(
+    const created = this.buildTurn(
       session,
       input.prompt,
       input.idempotencyKey,
@@ -291,20 +295,22 @@ export class SessionSupervisor {
     const input = sessionCommandSchemas.cancel_turn.parse(command);
     const turn = this.requireTurn(input.turnId, input.sessionId);
     if (turn.phase === "queued" || turn.phase === "running") {
-      turn.phase = "cancelled";
-      this.write("turn_cancelled", input.sessionId, turn.turnId, undefined, { turn });
-      if (this.running.has(input.sessionId))
-        await this.runtime.cancelTurn?.(input.sessionId, input.turnId);
+      const wasRunning = turn.phase === "running";
+      const cancelled = { ...this.copyTurn(turn), phase: "cancelled" as const };
+      this.commit("turn_cancelled", input.sessionId, turn.turnId, undefined, {
+        turn: cancelled
+      });
+      if (wasRunning)
+        await this.cancelRuntime(this.require(input.sessionId), this.turn(turn.turnId));
     }
-    return this.copyTurn(turn);
+    return this.copyTurn(this.turn(input.turnId));
   }
   checkpointSession(
     command: z.input<(typeof sessionCommandSchemas)["checkpoint_session"]>
   ): SessionStatus {
     const input = sessionCommandSchemas.checkpoint_session.parse(command);
-    const session = this.requireActive(input.sessionId);
-    session.workspace = { ...session.workspace, checkpointRef: input.checkpointRef };
-    this.write("session_checkpointed", input.sessionId, undefined, undefined, {
+    this.requireActive(input.sessionId);
+    this.commit("session_checkpointed", input.sessionId, undefined, undefined, {
       checkpointRef: input.checkpointRef
     });
     return this.status(input.sessionId);
@@ -313,7 +319,8 @@ export class SessionSupervisor {
     const input = sessionCommandSchemas.resume_session.parse(command);
     const session = this.require(input.sessionId);
     if (session.phase === "terminated") throw new Error("terminated session cannot resume");
-    this.write("session_resumed", input.sessionId, undefined, undefined, {});
+    this.commit("session_resumed", input.sessionId, undefined, undefined, {});
+    this.journalBlocked.delete(input.sessionId);
     this.admitQueued(session);
     return this.status(input.sessionId);
   }
@@ -323,16 +330,21 @@ export class SessionSupervisor {
     const input = sessionCommandSchemas.terminate_session.parse(command);
     const session = this.require(input.sessionId);
     if (session.phase === "terminated") return this.status(input.sessionId);
-    session.phase = "terminated";
-    for (const turnId of session.turnIds) {
+    const activeTurnId = session.activeTurnId;
+    const terminated = { ...this.copySession(session), phase: "terminated" as const };
+    delete terminated.activeTurnId;
+    const turns = session.turnIds.map((turnId) => {
       const turn = this.turn(turnId);
-      if (turn.phase === "queued" || turn.phase === "running") {
-        turn.phase = "cancelled";
-        this.write("turn_cancelled", input.sessionId, turnId, undefined, { turn });
-        if (turnId === session.activeTurnId) this.cancelRuntime(session, turn);
-      }
-    }
-    this.write("session_terminated", input.sessionId, undefined, undefined, {});
+      return turn.phase === "queued" || turn.phase === "running"
+        ? { ...this.copyTurn(turn), phase: "cancelled" as const }
+        : this.copyTurn(turn);
+    });
+    this.commit("session_terminated", input.sessionId, undefined, undefined, {
+      session: terminated,
+      turns
+    });
+    if (activeTurnId)
+      void this.cancelRuntime(this.require(input.sessionId), this.turn(activeTurnId));
     return this.status(input.sessionId);
   }
   streamEvents(command: z.input<(typeof sessionCommandSchemas)["stream_events"]>): AgentdEvent[] {
@@ -348,7 +360,7 @@ export class SessionSupervisor {
   getTurn(turnId: string): TurnStatus {
     return this.copyTurn(this.turn(turnId));
   }
-  private newTurn(
+  private buildTurn(
     session: SessionStatus,
     prompt: string,
     idempotencyKey: string,
@@ -366,13 +378,10 @@ export class SessionSupervisor {
       recoveryFacts: [],
       continuationDepth
     };
-    this.turns.set(turn.turnId, turn);
-    this.idempotency.set(`${turn.sessionId}:${turn.idempotencyKey}`, turn.turnId);
-    session.turnIds.push(turn.turnId);
     return turn;
   }
   private enqueue(turn: TurnStatus): void {
-    this.write("turn_enqueued", turn.sessionId, turn.turnId, undefined, { turn });
+    this.commit("turn_enqueued", turn.sessionId, turn.turnId, undefined, { turn });
     this.markReady(this.require(turn.sessionId));
     void this.schedule();
   }
@@ -383,6 +392,7 @@ export class SessionSupervisor {
   private markReady(session: SessionStatus): void {
     if (
       session.phase === "active" &&
+      !this.journalBlocked.has(session.sessionId) &&
       session.turnIds.some((turnId) => this.turn(turnId).phase === "queued") &&
       !this.ready.includes(session.sessionId)
     )
@@ -403,19 +413,17 @@ export class SessionSupervisor {
             : undefined;
         if (!turn) continue;
         this.running.add(sessionId);
-        session.activeTurnId = turn.turnId;
-        turn.phase = "running";
-        void this.execute(session, turn).finally(() => {
-          this.running.delete(sessionId);
-          if (session.activeTurnId === turn.turnId) delete session.activeTurnId;
-          if (
-            session.phase === "active" &&
-            session.turnIds.some((turnId) => this.turn(turnId).phase === "queued") &&
-            !this.ready.includes(sessionId)
-          )
-            this.ready.push(sessionId);
-          void this.schedule();
-        });
+        void this.execute(session, turn)
+          .catch(() => {
+            // A journal failure means live state must remain at its last durable event. Stop
+            // automatic admission for this session until an explicit successful resume.
+            this.journalBlocked.add(sessionId);
+          })
+          .finally(() => {
+            this.running.delete(sessionId);
+            this.markReady(session);
+            void this.schedule();
+          });
       }
     } finally {
       this.draining = false;
@@ -423,9 +431,13 @@ export class SessionSupervisor {
   }
   private async execute(session: SessionStatus, turn: TurnStatus): Promise<void> {
     const attemptId = this.uniqueId("attempt");
-    turn.attemptIds.push(attemptId);
-    this.write("attempt_started", session.sessionId, turn.turnId, attemptId, {
-      turn,
+    const started = {
+      ...this.copyTurn(turn),
+      phase: "running" as const,
+      attemptIds: [...turn.attemptIds, attemptId]
+    };
+    this.commit("attempt_started", session.sessionId, turn.turnId, attemptId, {
+      turn: started,
       conversation: session.conversation
     });
     const input: RuntimeInput = {
@@ -444,139 +456,123 @@ export class SessionSupervisor {
         session.conversation &&
         !turn.recoveryFacts.includes("backend_thread_missing_fresh_adapter_attempt")
       ) {
-        turn.recoveryFacts.push("backend_thread_missing_fresh_adapter_attempt");
-        session.conversation = undefined;
-        // This durable state means the failed invocation is known, and exactly one fresh
-        // adapter attempt is safe to admit. It must not be mistaken for an unknown in-flight run.
-        turn.phase = "queued";
-        this.write("continuity_degraded", session.sessionId, turn.turnId, attemptId, {
-          turn,
-          facts: turn.recoveryFacts,
+        const recoveryFacts = [
+          ...turn.recoveryFacts,
+          "backend_thread_missing_fresh_adapter_attempt"
+        ];
+        const retry = {
+          ...this.copyTurn(turn),
+          phase: "queued" as const,
+          recoveryFacts
+        };
+        this.commit("continuity_degraded", session.sessionId, turn.turnId, attemptId, {
+          turn: retry,
+          facts: recoveryFacts,
           sessionConversation: null
         });
         this.markReady(session);
         return;
       }
-      turn.phase = error instanceof MissingBackendThreadError ? "failed" : "reconciliation";
-      turn.recoveryFacts.push(
+      const fact =
         error instanceof MissingBackendThreadError
           ? "fresh_adapter_attempt_also_missing_no_loop"
-          : "interrupted_attempt_requires_reconciliation"
-      );
-      this.write("attempt_interrupted", session.sessionId, turn.turnId, attemptId, {
-        turn,
-        facts: turn.recoveryFacts
+          : "interrupted_attempt_requires_reconciliation";
+      const interrupted = {
+        ...this.copyTurn(turn),
+        phase:
+          error instanceof MissingBackendThreadError
+            ? ("failed" as const)
+            : ("reconciliation" as const),
+        recoveryFacts: [...turn.recoveryFacts, fact]
+      };
+      this.commit("attempt_interrupted", session.sessionId, turn.turnId, attemptId, {
+        turn: interrupted,
+        facts: interrupted.recoveryFacts
       });
-      this.write("turn_finished", session.sessionId, turn.turnId, attemptId, { turn });
       return;
     }
     // Cancellation/termination wins any late result and deliberately leaves conversation unchanged.
     if (turn.phase !== "running" || session.phase !== "active") return;
-    session.conversation = result.conversation;
-    this.write("attempt_completed", session.sessionId, turn.turnId, attemptId, {
+    this.commit("attempt_completed", session.sessionId, turn.turnId, attemptId, {
       conversation: result.conversation,
       facts: result.facts
     });
-    const verified = await this.verifier.verify({ ...input, result });
+    let verified: { outcome: VerifierOutcome; facts: string[] };
+    try {
+      verified = await this.verifier.verify({ ...input, result });
+    } catch {
+      if (turn.phase !== "running" || session.phase !== "active") return;
+      const recoveryFacts = [
+        ...turn.recoveryFacts,
+        "verifier_infrastructure_failure_requires_reconciliation"
+      ];
+      const interrupted = {
+        ...this.copyTurn(turn),
+        phase: "reconciliation" as const,
+        recoveryFacts
+      };
+      this.commit("verifier_failed", session.sessionId, turn.turnId, attemptId, {
+        turn: interrupted,
+        facts: recoveryFacts
+      });
+      return;
+    }
     if (turn.phase !== "running" || session.phase !== "active") return;
-    turn.verifierState = verified.outcome;
-    this.write("verifier_evaluated", session.sessionId, turn.turnId, attemptId, {
-      turn,
-      outcome: verified.outcome,
-      facts: verified.facts
-    });
     if (verified.outcome === "satisfied") {
-      turn.phase = "completed";
-      this.write("turn_finished", session.sessionId, turn.turnId, attemptId, { turn });
+      const completed = {
+        ...this.copyTurn(turn),
+        phase: "completed" as const,
+        verifierState: "satisfied" as const
+      };
+      this.commit("verifier_evaluated", session.sessionId, turn.turnId, attemptId, {
+        turn: completed,
+        outcome: verified.outcome,
+        facts: verified.facts
+      });
       return;
     }
     if (
       verified.outcome === "escalated" ||
       turn.continuationDepth >= this.maxVerifierContinuations
     ) {
-      turn.phase = "failed";
-      turn.verifierState = "escalated";
-      this.write("verifier_escalated", session.sessionId, turn.turnId, attemptId, {
-        turn,
+      const escalated = {
+        ...this.copyTurn(turn),
+        phase: "failed" as const,
+        verifierState: "escalated" as const
+      };
+      this.commit("verifier_escalated", session.sessionId, turn.turnId, attemptId, {
+        turn: escalated,
         facts: verified.facts
       });
-      this.write("turn_finished", session.sessionId, turn.turnId, attemptId, { turn });
       return;
     }
-    turn.phase = "completed";
-    const continuation = this.newTurn(
+    const completed = {
+      ...this.copyTurn(turn),
+      phase: "completed" as const,
+      verifierState: "continue" as const
+    };
+    const continuation = this.buildTurn(
       session,
       `Continue the prior turn after verifier feedback: ${verified.facts.join("; ")}`,
       `continuation-${turn.turnId}-${turn.continuationDepth + 1}`,
       turn.turnId,
       turn.continuationDepth + 1
     );
-    this.write("verifier_continuation", session.sessionId, turn.turnId, attemptId, {
-      sourceTurn: turn,
+    this.commit("verifier_continuation", session.sessionId, turn.turnId, attemptId, {
+      sourceTurn: completed,
       continuationTurn: continuation,
       facts: verified.facts
     });
-    this.enqueue(continuation);
+    this.markReady(session);
+    void this.schedule();
   }
   private replay(): void {
+    let previousCursor = 0;
     for (const event of this.journal.read()) {
-      this.usedIds.add(event.sessionId);
-      if (event.turnId) this.usedIds.add(event.turnId);
-      if (event.attemptId) this.usedIds.add(event.attemptId);
-      switch (event.kind) {
-        case "session_created":
-          this.sessions.set(event.sessionId, this.copySession(event.payload.session));
-          break;
-        case "turn_enqueued":
-          this.restoreTurn(event.payload.turn);
-          break;
-        case "verifier_continuation":
-          this.restoreTurn(event.payload.sourceTurn);
-          this.restoreTurn(event.payload.continuationTurn);
-          break;
-        case "attempt_started":
-          this.restoreTurn(event.payload.turn);
-          break;
-        case "attempt_completed": {
-          const session = this.sessions.get(event.sessionId);
-          if (session) session.conversation = event.payload.conversation;
-          break;
-        }
-        case "continuity_degraded": {
-          const session = this.sessions.get(event.sessionId);
-          if (session) {
-            if (event.payload.sessionConversation)
-              session.conversation = event.payload.sessionConversation;
-            else delete session.conversation;
-          }
-          this.restoreTurn(event.payload.turn);
-          break;
-        }
-        case "attempt_interrupted":
-        case "turn_cancelled":
-        case "turn_finished":
-        case "verifier_evaluated":
-        case "verifier_escalated":
-        case "cancellation_failed":
-          this.restoreTurn(event.payload.turn);
-          break;
-        case "session_checkpointed": {
-          const session = this.sessions.get(event.sessionId);
-          if (session)
-            session.workspace = {
-              ...session.workspace,
-              checkpointRef: event.payload.checkpointRef
-            };
-          break;
-        }
-        case "session_terminated": {
-          const session = this.sessions.get(event.sessionId);
-          if (session) session.phase = "terminated";
-          break;
-        }
-        default:
-          break;
-      }
+      if (event.cursor <= previousCursor)
+        throw new Error("journal cursors must be strictly increasing");
+      previousCursor = event.cursor;
+      this.applyEvent(event);
     }
     // An invocation was durable before it began, but its outcome was not durable at restart.
     // Never re-run it: surface a reconciliation fact for the adapter/authority owner instead.
@@ -588,23 +584,98 @@ export class SessionSupervisor {
       }
     }
   }
+  private applyEvent(event: AgentdEvent): void {
+    this.usedIds.add(event.sessionId);
+    if (event.turnId) this.usedIds.add(event.turnId);
+    if (event.attemptId) this.usedIds.add(event.attemptId);
+    switch (event.kind) {
+      case "session_created":
+        this.restoreSession(event.payload.session);
+        break;
+      case "turn_enqueued":
+      case "attempt_started":
+      case "attempt_interrupted":
+      case "turn_cancelled":
+      case "turn_finished":
+      case "verifier_evaluated":
+      case "verifier_escalated":
+      case "verifier_failed":
+      case "cancellation_failed":
+        this.restoreTurn(event.payload.turn);
+        break;
+      case "verifier_continuation":
+        this.restoreTurn(event.payload.sourceTurn);
+        this.restoreTurn(event.payload.continuationTurn);
+        break;
+      case "attempt_completed": {
+        const session = this.require(event.sessionId);
+        session.conversation = { ...event.payload.conversation };
+        break;
+      }
+      case "continuity_degraded": {
+        const session = this.require(event.sessionId);
+        if (event.payload.sessionConversation)
+          session.conversation = { ...event.payload.sessionConversation };
+        else delete session.conversation;
+        this.restoreTurn(event.payload.turn);
+        break;
+      }
+      case "session_checkpointed": {
+        const session = this.require(event.sessionId);
+        session.workspace = {
+          ...session.workspace,
+          checkpointRef: event.payload.checkpointRef
+        };
+        break;
+      }
+      case "session_terminated":
+        this.restoreSession(event.payload.session);
+        for (const turn of event.payload.turns) this.restoreTurn(turn);
+        break;
+      case "session_resumed":
+        break;
+    }
+  }
+  private restoreSession(session: SessionStatus): void {
+    const copy = this.copySession(session);
+    this.usedIds.add(copy.sessionId);
+    const existing = this.sessions.get(copy.sessionId);
+    if (existing) {
+      delete existing.conversation;
+      delete existing.activeTurnId;
+      Object.assign(existing, copy);
+    } else {
+      this.sessions.set(copy.sessionId, copy);
+    }
+  }
   private restoreTurn(turn: TurnStatus): void {
     const copy = this.copyTurn(turn);
     this.usedIds.add(copy.turnId);
     for (const attemptId of copy.attemptIds) this.usedIds.add(attemptId);
-    this.turns.set(copy.turnId, copy);
+    const existing = this.turns.get(copy.turnId);
+    if (existing) {
+      delete existing.parentTurnId;
+      delete existing.verifierState;
+      Object.assign(existing, copy);
+    } else {
+      this.turns.set(copy.turnId, copy);
+    }
     this.idempotency.set(`${copy.sessionId}:${copy.idempotencyKey}`, copy.turnId);
     const session = this.sessions.get(copy.sessionId);
-    if (session && !session.turnIds.includes(copy.turnId)) session.turnIds.push(copy.turnId);
+    if (session) {
+      if (!session.turnIds.includes(copy.turnId)) session.turnIds.push(copy.turnId);
+      if (copy.phase === "running") session.activeTurnId = copy.turnId;
+      else if (session.activeTurnId === copy.turnId) delete session.activeTurnId;
+    }
   }
-  private write<K extends keyof typeof eventPayloads>(
+  private commit<K extends keyof typeof eventPayloads>(
     kind: K,
     sessionId: string,
     turnId: string | undefined,
     attemptId: string | undefined,
     payload: z.infer<(typeof eventPayloads)[K]>
-  ): void {
-    this.journal.append(
+  ): AgentdEvent {
+    const written = this.journal.append(
       journalEventSchema.parse({
         version: AGENTD_PROTOCOL_VERSION,
         kind,
@@ -614,28 +685,33 @@ export class SessionSupervisor {
         payload
       })
     );
+    this.applyEvent(written);
+    return written;
   }
   private uniqueId(prefix: string): string {
     let value: string;
     do value = this.ids.next(prefix);
     while (this.usedIds.has(value));
-    this.usedIds.add(value);
     return value;
   }
-  private cancelRuntime(session: SessionStatus, turn: TurnStatus): void {
+  private async cancelRuntime(session: SessionStatus, turn: TurnStatus): Promise<void> {
     if (!this.runtime.cancelTurn) return;
-    void Promise.resolve()
-      .then(() => this.runtime.cancelTurn!(session.sessionId, turn.turnId))
-      .catch(() => {
-        // Deliberately do not surface adapter errors from a terminated session as unhandled
-        // rejections. The durable terminal state remains authoritative.
-        if (!turn.recoveryFacts.includes("runtime_cancel_failed"))
-          turn.recoveryFacts.push("runtime_cancel_failed");
-        this.write("cancellation_failed", session.sessionId, turn.turnId, undefined, {
-          turn,
+    try {
+      await this.runtime.cancelTurn(session.sessionId, turn.turnId);
+    } catch {
+      const recoveryFacts = turn.recoveryFacts.includes("runtime_cancel_failed")
+        ? [...turn.recoveryFacts]
+        : [...turn.recoveryFacts, "runtime_cancel_failed"];
+      const failed = { ...this.copyTurn(turn), recoveryFacts };
+      try {
+        this.commit("cancellation_failed", session.sessionId, turn.turnId, undefined, {
+          turn: failed,
           facts: ["runtime_cancel_failed"]
         });
-      });
+      } catch {
+        this.journalBlocked.add(session.sessionId);
+      }
+    }
   }
   private require(sessionId: string): SessionStatus {
     const session = this.sessions.get(sessionId);
@@ -659,7 +735,8 @@ export class SessionSupervisor {
   }
   private status(sessionId: string): SessionStatus {
     const session = this.require(sessionId);
-    return { ...this.copySession(session), nextCursor: this.journal.read().length + 1 };
+    const events = this.journal.read();
+    return { ...this.copySession(session), nextCursor: (events.at(-1)?.cursor ?? 0) + 1 };
   }
   private copySession(session: SessionStatus): SessionStatus {
     return {

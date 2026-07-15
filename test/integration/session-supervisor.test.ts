@@ -32,6 +32,13 @@ class ControlledAdapter implements RuntimeAdapter {
   }
 }
 
+class CancellableControlledAdapter extends ControlledAdapter {
+  cancellations = 0;
+  async cancelTurn(): Promise<void> {
+    this.cancellations += 1;
+  }
+}
+
 class ReplayJournal implements SessionJournal {
   constructor(private readonly events: AgentdEvent[]) {}
   append(event: Parameters<SessionJournal["append"]>[0]): AgentdEvent {
@@ -41,6 +48,24 @@ class ReplayJournal implements SessionJournal {
   }
   read(): AgentdEvent[] {
     return this.events;
+  }
+}
+
+class FaultJournal implements SessionJournal {
+  private readonly inner = new InMemorySessionJournal();
+  private failedKind?: AgentdEvent["kind"];
+  failOn(kind: AgentdEvent["kind"]): void {
+    this.failedKind = kind;
+  }
+  recover(): void {
+    this.failedKind = undefined;
+  }
+  append(event: Parameters<SessionJournal["append"]>[0]): AgentdEvent {
+    if (event.kind === this.failedKind) throw new Error(`disk full: ${event.kind}`);
+    return this.inner.append(event);
+  }
+  read(): AgentdEvent[] {
+    return this.inner.read();
   }
 }
 
@@ -261,6 +286,49 @@ describe("session supervisor spike", () => {
     expect(journal.read().filter((event) => event.kind === "attempt_interrupted")).toHaveLength(1);
   });
 
+  it("durably reconciles verifier infrastructure failures without sticking or rejecting", async () => {
+    const journal = new InMemorySessionJournal();
+    let checks = 0;
+    const supervisor = new SessionSupervisor(
+      journal,
+      {
+        async runTurn() {
+          return {
+            conversation: { adapterKind: "test", adapterVersion: "1", backendThreadRef: "thread" }
+          };
+        }
+      },
+      {
+        async verify() {
+          checks += 1;
+          if (checks === 1) throw new Error("sensitive verifier infrastructure detail");
+          return { outcome: "satisfied", facts: ["checked"] };
+        }
+      },
+      new SequenceIds()
+    );
+    const session = supervisor.createSession(command("verifier-failure"));
+    const failed = supervisor.submitTurn(turn(session.sessionId, "first"));
+    const following = supervisor.submitTurn(turn(session.sessionId, "second"));
+    await settle();
+    await settle();
+    await settle();
+    expect(supervisor.getTurn(failed.turnId)).toMatchObject({
+      phase: "reconciliation",
+      recoveryFacts: ["verifier_infrastructure_failure_requires_reconciliation"]
+    });
+    expect(supervisor.getTurn(following.turnId).phase).toBe("completed");
+    expect(journal.read().filter((event) => event.kind === "verifier_failed")).toHaveLength(1);
+    expect(JSON.stringify(journal.read())).not.toContain(
+      "sensitive verifier infrastructure detail"
+    );
+    const replayed = new SessionSupervisor(journal, new ControlledAdapter(), satisfied);
+    expect(replayed.getTurn(failed.turnId)).toMatchObject({
+      phase: "reconciliation",
+      recoveryFacts: ["verifier_infrastructure_failure_requires_reconciliation"]
+    });
+  });
+
   it("audits bounded deterministic verifier continuation with satisfied and escalated outcomes", async () => {
     const adapter: RuntimeAdapter = {
       async runTurn() {
@@ -446,6 +514,7 @@ describe("session supervisor spike", () => {
     const queued = storedTurn("queued-turn", activeSession.sessionId, "queued");
     const cancelled = storedTurn("cancelled-turn", activeSession.sessionId, "cancelled");
     const terminated = storedTurn("terminated-turn", terminatedSession.sessionId, "queued");
+    const terminatedCancelled = { ...terminated, phase: "cancelled" as const };
     const events: AgentdEvent[] = [
       {
         version: AGENTD_PROTOCOL_VERSION,
@@ -498,7 +567,7 @@ describe("session supervisor spike", () => {
         cursor: 7,
         kind: "session_terminated",
         sessionId: terminatedSession.sessionId,
-        payload: {}
+        payload: { session: terminatedSession, turns: [terminatedCancelled] }
       } as AgentdEvent
     ];
     const adapter = new ControlledAdapter();
@@ -521,7 +590,7 @@ describe("session supervisor spike", () => {
       })
     ).toThrow("terminated session cannot resume");
     expect(supervisor.getTurn(cancelled.turnId).phase).toBe("cancelled");
-    expect(supervisor.getTurn(terminated.turnId).phase).toBe("queued");
+    expect(supervisor.getTurn(terminated.turnId).phase).toBe("cancelled");
   });
 
   it("makes cancellation and termination win late runtime results and never starts terminated queued work", async () => {
@@ -681,6 +750,183 @@ describe("session supervisor spike", () => {
     const nextSession = restarted.createSession(command("id-reset"));
     const nextTurn = restarted.submitTurn(turn(nextSession.sessionId, "new"));
     expect(nextTurn.turnId).not.toBe(continuationEvent.payload.continuationTurn.turnId);
+  });
+
+  it("applies command state only after its journal append succeeds", async () => {
+    const journal = new FaultJournal();
+    const adapter = new CancellableControlledAdapter();
+    const supervisor = new SessionSupervisor(journal, adapter, satisfied, new SequenceIds());
+
+    journal.failOn("session_created");
+    expect(() => supervisor.createSession(command("rejected-session"))).toThrow("disk full");
+    expect(journal.read()).toHaveLength(0);
+
+    journal.recover();
+    const session = supervisor.createSession(command("accepted-session"));
+    journal.failOn("turn_enqueued");
+    expect(() => supervisor.submitTurn(turn(session.sessionId, "same-key"))).toThrow("disk full");
+    expect(
+      supervisor.getStatus({ version: AGENTD_PROTOCOL_VERSION, sessionId: session.sessionId })
+        .turnIds
+    ).toEqual([]);
+
+    journal.recover();
+    const accepted = supervisor.submitTurn(turn(session.sessionId, "same-key"));
+    await settle();
+    expect(adapter.inputs.map((input) => input.turn.turnId)).toEqual([accepted.turnId]);
+
+    journal.failOn("session_checkpointed");
+    expect(() =>
+      supervisor.checkpointSession({
+        version: AGENTD_PROTOCOL_VERSION,
+        sessionId: session.sessionId,
+        checkpointRef: "rejected-checkpoint"
+      })
+    ).toThrow("disk full");
+    expect(
+      supervisor.getStatus({ version: AGENTD_PROTOCOL_VERSION, sessionId: session.sessionId })
+        .workspace.checkpointRef
+    ).toBeUndefined();
+
+    journal.failOn("turn_cancelled");
+    await expect(
+      supervisor.cancelTurn({
+        version: AGENTD_PROTOCOL_VERSION,
+        sessionId: session.sessionId,
+        turnId: accepted.turnId
+      })
+    ).rejects.toThrow("disk full");
+    expect(supervisor.getTurn(accepted.turnId).phase).toBe("running");
+    expect(adapter.cancellations).toBe(0);
+
+    journal.recover();
+    await supervisor.cancelTurn({
+      version: AGENTD_PROTOCOL_VERSION,
+      sessionId: session.sessionId,
+      turnId: accepted.turnId
+    });
+    expect(supervisor.getTurn(accepted.turnId).phase).toBe("cancelled");
+    expect(adapter.cancellations).toBe(1);
+  });
+
+  it("makes termination atomic with cancellation and runtime side effects", async () => {
+    const journal = new FaultJournal();
+    const adapter = new CancellableControlledAdapter();
+    const supervisor = new SessionSupervisor(journal, adapter, satisfied, new SequenceIds());
+    const session = supervisor.createSession(command("terminate-append"));
+    const accepted = supervisor.submitTurn(turn(session.sessionId, "one"));
+    await settle();
+
+    journal.failOn("session_terminated");
+    expect(() =>
+      supervisor.terminateSession({
+        version: AGENTD_PROTOCOL_VERSION,
+        sessionId: session.sessionId
+      })
+    ).toThrow("disk full");
+    expect(
+      supervisor.getStatus({ version: AGENTD_PROTOCOL_VERSION, sessionId: session.sessionId }).phase
+    ).toBe("active");
+    expect(supervisor.getTurn(accepted.turnId).phase).toBe("running");
+    expect(adapter.cancellations).toBe(0);
+
+    journal.recover();
+    supervisor.terminateSession({ version: AGENTD_PROTOCOL_VERSION, sessionId: session.sessionId });
+    await settle();
+    expect(
+      supervisor.getStatus({ version: AGENTD_PROTOCOL_VERSION, sessionId: session.sessionId }).phase
+    ).toBe("terminated");
+    expect(supervisor.getTurn(accepted.turnId).phase).toBe("cancelled");
+    expect(adapter.cancellations).toBe(1);
+  });
+
+  it("does not invoke a runtime or hot-loop when attempt startup cannot be journaled", async () => {
+    const journal = new FaultJournal();
+    const adapter = new ControlledAdapter();
+    const supervisor = new SessionSupervisor(journal, adapter, satisfied, new SequenceIds());
+    const session = supervisor.createSession(command("attempt-append"));
+    journal.failOn("attempt_started");
+    const accepted = supervisor.submitTurn(turn(session.sessionId, "one"));
+    await settle();
+    await settle();
+    expect(adapter.inputs).toHaveLength(0);
+    expect(supervisor.getTurn(accepted.turnId)).toMatchObject({ phase: "queued", attemptIds: [] });
+    expect(journal.read().filter((event) => event.kind === "attempt_started")).toHaveLength(0);
+
+    journal.recover();
+    supervisor.resumeSession({ version: AGENTD_PROTOCOL_VERSION, sessionId: session.sessionId });
+    await settle();
+    expect(adapter.inputs).toHaveLength(1);
+  });
+
+  it("does not apply an unjournaled runtime result or create a ghost verifier continuation", async () => {
+    const resultJournal = new FaultJournal();
+    const resultAdapter = new ControlledAdapter();
+    let resultChecks = 0;
+    const resultSupervisor = new SessionSupervisor(
+      resultJournal,
+      resultAdapter,
+      {
+        async verify() {
+          resultChecks += 1;
+          return { outcome: "satisfied", facts: [] };
+        }
+      },
+      new SequenceIds()
+    );
+    const resultSession = resultSupervisor.createSession(command("result-append"));
+    const resultTurn = resultSupervisor.submitTurn(turn(resultSession.sessionId, "one"));
+    await settle();
+    resultJournal.failOn("attempt_completed");
+    resultAdapter.complete(0, "unjournaled-thread");
+    await settle();
+    expect(resultChecks).toBe(0);
+    expect(resultSupervisor.getTurn(resultTurn.turnId).phase).toBe("running");
+    expect(
+      resultSupervisor.getStatus({
+        version: AGENTD_PROTOCOL_VERSION,
+        sessionId: resultSession.sessionId
+      }).conversation
+    ).toBeUndefined();
+    const resultReplay = new SessionSupervisor(
+      new ReplayJournal(resultJournal.read()),
+      new ControlledAdapter(),
+      satisfied
+    );
+    expect(resultReplay.getTurn(resultTurn.turnId).phase).toBe("reconciliation");
+
+    const continuationJournal = new FaultJournal();
+    continuationJournal.failOn("verifier_continuation");
+    const continuationSupervisor = new SessionSupervisor(
+      continuationJournal,
+      {
+        async runTurn() {
+          return {
+            conversation: { adapterKind: "test", adapterVersion: "1", backendThreadRef: "thread" }
+          };
+        }
+      },
+      {
+        async verify() {
+          return { outcome: "continue", facts: ["more work"] };
+        }
+      },
+      new SequenceIds()
+    );
+    const continuationSession = continuationSupervisor.createSession(command("child-append"));
+    const source = continuationSupervisor.submitTurn(turn(continuationSession.sessionId, "one"));
+    await settle();
+    await settle();
+    expect(
+      continuationSupervisor.getStatus({
+        version: AGENTD_PROTOCOL_VERSION,
+        sessionId: continuationSession.sessionId
+      }).turnIds
+    ).toEqual([source.turnId]);
+    expect(continuationSupervisor.getTurn(source.turnId).phase).toBe("running");
+    expect(
+      continuationJournal.read().filter((event) => event.kind === "verifier_continuation")
+    ).toHaveLength(0);
   });
 
   it("records a cancellation failure without undoing termination or rejecting unhandled", async () => {

@@ -85,4 +85,63 @@ describe("agentd session-supervisor protocol schemas", () => {
       })
     ).toThrow();
   });
+
+  it("requires atomic termination snapshots and typed verifier failure evidence", () => {
+    const session = {
+      version: AGENTD_PROTOCOL_VERSION,
+      sessionId: "session-1",
+      coordinatorBinding: "coordinator",
+      authorityBinding: "authority",
+      workspace: { workspaceRef: "workspace" },
+      phase: "terminated",
+      turnIds: ["turn-1"],
+      nextCursor: 3
+    };
+    const turn = {
+      turnId: "turn-1",
+      sessionId: "session-1",
+      prompt: "work",
+      idempotencyKey: "key-1",
+      phase: "cancelled",
+      attemptIds: ["attempt-1"],
+      recoveryFacts: [],
+      continuationDepth: 0
+    };
+    expect(() =>
+      agentdEventSchema.parse({
+        version: AGENTD_PROTOCOL_VERSION,
+        cursor: 3,
+        kind: "session_terminated",
+        sessionId: "session-1",
+        payload: {}
+      })
+    ).toThrow();
+    expect(
+      agentdEventSchema.parse({
+        version: AGENTD_PROTOCOL_VERSION,
+        cursor: 3,
+        kind: "session_terminated",
+        sessionId: "session-1",
+        payload: { session, turns: [turn] }
+      }).kind
+    ).toBe("session_terminated");
+    expect(
+      agentdEventSchema.parse({
+        version: AGENTD_PROTOCOL_VERSION,
+        cursor: 4,
+        kind: "verifier_failed",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        attemptId: "attempt-1",
+        payload: {
+          turn: {
+            ...turn,
+            phase: "reconciliation",
+            recoveryFacts: ["verifier_infrastructure_failure_requires_reconciliation"]
+          },
+          facts: ["verifier_infrastructure_failure_requires_reconciliation"]
+        }
+      }).kind
+    ).toBe("verifier_failed");
+  });
 });
