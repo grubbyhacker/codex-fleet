@@ -20,6 +20,9 @@ type AdapterOptions = {
   socketPath: string;
 };
 
+export const listTargetsToolDescription =
+  "Discover repos and shell targets available to this client, including repo mergePolicy guidance when present. Do not call as a connection preflight or routine first step. If the target alias and delivery boundary are already known, delegate directly; use this only for target discovery, current availability, or missing policy/capability context.";
+
 export function createAdapterServer(options = loadAdapterOptions()): McpServer {
   const server = new McpServer({ name: "codex-fleet-mcp-adapter", version: "0.0.0" });
 
@@ -30,13 +33,7 @@ export function createAdapterServer(options = loadAdapterOptions()): McpServer {
     initializeRequestSchema,
     "Declare or reattach to a fleet session."
   );
-  registerProxyTool(
-    server,
-    options,
-    "list_targets",
-    z.object({}),
-    "List repos and shell targets available to this client, including repo mergePolicy guidance when present."
-  );
+  registerProxyTool(server, options, "list_targets", z.object({}), listTargetsToolDescription);
   registerProxyTool(
     server,
     options,

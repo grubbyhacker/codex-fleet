@@ -481,3 +481,11 @@ Keep this file concise and high-level. If it grows beyond 500 lines, compact old
 - Waited for authenticated daemon RPC readiness after launchd restart so process status cannot race socket creation.
 - Released every terminal smoke task automatically and added `--skip-worker-smoke` for intentional exceptions.
 - Added regression coverage for success, delayed RPC readiness, launcher failure, incorrect output, route mismatch, timeout safety, and terminal-task release.
+
+## 2026-07-14 Cross-Client Fleet Skill
+
+### Did
+
+- Installed the canonical `use-codex-fleet` skill for both Codex and Claude from one source during local deployment.
+- Inhibited routine `list_targets` connection preflights in the shared skill, reference patterns, and MCP tool metadata.
+- Added regression coverage for cross-client skill distribution and discovery-call guidance.

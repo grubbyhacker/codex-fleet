@@ -15,6 +15,8 @@ Available MCP methods:
 - `get_task_history({ taskId, limit })`
 - `end_task({ taskId, reason })`
 
+Do not call `list_targets` as a connection preflight. Delegate directly when the target alias and delivery boundary are already known; use `list_targets` only for discovery or missing current policy/capability context.
+
 Task states:
 
 - `queued`
@@ -88,7 +90,7 @@ requirement for every repository edit.
   "deliveryMode": "pr_for_review",
   "risk": "low",
   "modelTier": "standard",
-  "prompt": "Treat CLAUDE.md the same as AGENTS.md. Read repo guidance first. Work in Fleet-owned task resources only. Respect the target repo merge policy from list_targets. Implement the requested change, run the documented validation, open a PR for review, and report the branch, commit, PR URL, validation results, and any residual risks."
+  "prompt": "Treat CLAUDE.md the same as AGENTS.md. Read repo guidance first. Work in Fleet-owned task resources only. Respect the target repo merge policy. Implement the requested change, run the documented validation, open a PR for review, and report the branch, commit, PR URL, validation results, and any residual risks."
 }
 ```
 

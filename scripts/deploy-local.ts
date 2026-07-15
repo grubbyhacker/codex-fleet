@@ -31,7 +31,7 @@ Build and deploy local Codex Fleet binaries predictably.
 Behavior:
 - checks queued/running/fresh-stale Fleet tasks before daemon restart;
 - builds and installs binaries;
-- installs the use-codex-fleet skill unless --skip-skill is passed;
+- installs the use-codex-fleet skill for Codex and Claude unless --skip-skill is passed;
 - restarts only the LaunchAgent daemon unless --skip-daemon-restart is passed;
 - runs a paid, minimal Luna worker through the installed daemon unless --skip-worker-smoke is passed;
 - never kills codex-fleet-mcp adapter processes.

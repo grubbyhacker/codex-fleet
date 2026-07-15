@@ -1,6 +1,6 @@
 ---
 name: use-codex-fleet
-description: "Use Codex Fleet to delegate work to local Codex worker agents through the official codex-fleet MCP server. Use when you need Fleet to hand a task to repo or shell workers, monitor delegated worker tasks without excessive polling, choose delivery modes/model tiers, or release Fleet-owned resources after delegated work. Do not use for developing, debugging, deploying, or administering Codex Fleet itself; for that, work directly in the codex-fleet repo and its operational docs."
+description: "This skill should be used when an orchestrator needs Codex Fleet to delegate work to local Codex worker agents, monitor delegated tasks without excessive polling, choose delivery modes/model tiers, or release Fleet-owned resources. Do not use it for developing, debugging, deploying, or administering Codex Fleet itself; work directly in the codex-fleet repo and its operational docs for those tasks."
 ---
 
 # Use Codex Fleet
@@ -18,8 +18,10 @@ Use the official `codex-fleet` MCP tools.
    - Use Fleet for multiple independent tasks, cross-repo work, long-running work that should survive the orchestrator's active turn, or work that benefits from separate worker context.
    - If you delegate only one worker, keep user-visible updates sparse: report delegation, terminal/stale/failed state, concrete blockers, and final result.
 
-2. Start by checking context:
-   - Use `list_targets` when you are not sure which repo or shell targets exist.
+2. Fetch only context the task needs:
+   - Do not call `list_targets` as a connection preflight or routine first step.
+   - When the target alias and delivery boundary are already known, delegate directly. Fleet's teaching error will point to `list_targets` if the alias is unavailable.
+   - Use `list_targets` only to discover an unknown target, confirm current target availability, or obtain merge/model policy that materially affects the delegation and was not already supplied.
    - Use `initialize` with a short `sessionName` when starting a coordinated session and the tool is available.
    - Use `list_tasks` before restarting services, cleaning action queues, or assuming no workers are active.
 
@@ -106,7 +108,7 @@ Give workers all operational boundaries up front:
 - repo or shell target and the requested delivery mode;
 - whether to treat `CLAUDE.md` the same as `AGENTS.md`;
 - branch, PR, validation, or merge expectations;
-- the repo merge policy shown by `list_targets` when merge behavior matters;
+- the repo merge policy when merge behavior matters; call `list_targets` only if that policy is needed and not already known;
 - what not to touch;
 - whether production, live services, or shared checkouts are off limits;
 - when to stop and report rather than improvise.
