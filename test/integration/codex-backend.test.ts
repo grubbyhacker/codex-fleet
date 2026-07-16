@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   captureTextStream,
   CodexEventTelemetry,
+  codexTimeoutMs,
   codexWorkerCommandArgs,
   codexWorkerResultFromToolResult,
   codexWorkerToolArguments,
@@ -16,6 +17,26 @@ import {
 } from "../../packages/daemon/src/workers/codex-backend.js";
 
 describe("codex worker backend", () => {
+  it("uses a 30-minute timeout for real worker turns by default", () => {
+    const previous = process.env.CODEX_FLEET_CODEX_TIMEOUT_MS;
+    delete process.env.CODEX_FLEET_CODEX_TIMEOUT_MS;
+    try {
+      expect(codexTimeoutMs()).toBe(30 * 60 * 1000);
+    } finally {
+      restoreEnv("CODEX_FLEET_CODEX_TIMEOUT_MS", previous);
+    }
+  });
+
+  it("honors an explicit real worker turn timeout", () => {
+    const previous = process.env.CODEX_FLEET_CODEX_TIMEOUT_MS;
+    process.env.CODEX_FLEET_CODEX_TIMEOUT_MS = "120000";
+    try {
+      expect(codexTimeoutMs()).toBe(120000);
+    } finally {
+      restoreEnv("CODEX_FLEET_CODEX_TIMEOUT_MS", previous);
+    }
+  });
+
   it("honors explicit codex command configuration", () => {
     const previous = process.env.CODEX_FLEET_CODEX_COMMAND;
     process.env.CODEX_FLEET_CODEX_COMMAND = "/custom/codex";
