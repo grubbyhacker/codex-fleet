@@ -238,8 +238,10 @@ function codexToolCall(
       };
 }
 
-function codexTimeoutMs(): number {
-  return Number(process.env.CODEX_FLEET_CODEX_TIMEOUT_MS ?? "600000");
+export const defaultCodexTimeoutMs = 30 * 60 * 1000;
+
+export function codexTimeoutMs(): number {
+  return Number(process.env.CODEX_FLEET_CODEX_TIMEOUT_MS ?? defaultCodexTimeoutMs);
 }
 
 function defaultCodexCommandCandidates(): string[] {

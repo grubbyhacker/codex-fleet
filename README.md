@@ -110,6 +110,10 @@ codex-fleet daemon run
 
 If `CODEX_FLEET_WORKER_BACKEND` is not set to `codex`, the daemon uses a fake worker backend. That is useful for tests and local UI development, but it will not run real delegated work.
 
+Real Codex worker turns have a 30-minute default deadline. Set
+`CODEX_FLEET_CODEX_TIMEOUT_MS` when a deployment needs a different bounded
+deadline; the setting takes effect when the daemon next starts.
+
 On macOS, the LaunchAgent helper installs a user-level service:
 
 ```sh
