@@ -443,9 +443,9 @@ export class SessionSupervisor {
     const input: RuntimeInput = {
       session: this.status(session.sessionId),
       turn: this.copyTurn(turn),
-      attemptId,
-      conversation: session.conversation
+      attemptId
     };
+    if (session.conversation) input.conversation = session.conversation;
     let result: RuntimeResult;
     try {
       result = await this.runtime.runTurn(input);
