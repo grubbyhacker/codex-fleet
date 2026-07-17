@@ -16,4 +16,14 @@ describe("session supervisor release workflow", () => {
     expect(fetchTag).toBeGreaterThan(-1);
     expect(verifyRelease).toBeGreaterThan(fetchTag);
   });
+
+  test("passes the GitHub package token through Bun's supported variable", () => {
+    const workflow = readFileSync(
+      join(import.meta.dir, "../../.github/workflows/session-supervisor-release.yml"),
+      "utf8"
+    );
+
+    expect(workflow).toContain("NPM_CONFIG_TOKEN: ${{ secrets.GITHUB_TOKEN }}");
+    expect(workflow).not.toContain("NODE_AUTH_TOKEN:");
+  });
 });
