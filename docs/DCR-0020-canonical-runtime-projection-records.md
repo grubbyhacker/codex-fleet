@@ -39,6 +39,15 @@ durable facts:
   durable turn identity and the worker fence that authorized them. Satisfied
   decisions bind a durable decision time so the cumulative deadline can be
   recomputed during replay.
+- A completion decision binds the exact model turn and the completed verifier
+  digest for that turn. A deterministic continuation may follow either the
+  `missing_or_stale` or `continuation` verifier outcome defined by the
+  registered contract; it cannot borrow a decision from another turn with the
+  same task snapshot.
+- The one same-depth fresh invocation is authorized only after the predecessor
+  completion durably records `missing_backend_thread`. Its reservation carries
+  `retryCause: missing_backend_thread`; the budget primitive and journal reducer
+  both reject an uncaused or mismatched same-depth reservation.
 
 The model-turn authorization remains the source of task, reservation, and
 idempotency authority. Registered task parameters and opaque references remain
@@ -69,6 +78,8 @@ depth.
 | Exact result and conversation identity survive replay      | Completion carried only a digest        | Extended `effect_completed`                                 | Digest/reference or conversation conflict fails closed            |
 | Usage and cumulative budget are atomic                     | No legal post-completion budget update  | `effect_completed.usage` plus matching `usage_recorded`     | Missing, mismatched, duplicate, and conflicting usage fail closed |
 | Transport compatibility is non-authoritative               | Consumer needed a second event log      | Canonical reducer projection                                | Restart from canonical records alone produces the same view       |
+| Fresh missing-thread retry preserves depth and authority   | Same-depth reservation lacked cause     | Completion outcome plus reservation retry cause             | Uncaused, mismatched, and second fresh retry fail closed          |
+| Decisions and continuations bind one exact source turn     | Task-only matching was ambiguous        | Decision turn identity plus completed verifier digest       | Cross-turn decision or continuation borrowing fails closed        |
 
 ## Consequences
 

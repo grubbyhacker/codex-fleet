@@ -63,7 +63,8 @@ const budgetReservationSchema = z
     continuationDepth: z.number().int().nonnegative(),
     reservedAtMs: z.number().int().nonnegative(),
     timeoutMs: z.number().int().positive(),
-    invocationKind: z.enum(["initial", "missing_thread_fresh", "continuation"]).optional()
+    invocationKind: z.enum(["initial", "missing_thread_fresh", "continuation"]).optional(),
+    retryCause: z.literal("missing_backend_thread").optional()
   })
   .strict();
 const usageRecordSchema = z.object({ attemptId: id, usage: usageAccountingSchema }).strict();
@@ -173,13 +174,14 @@ export class ContinuationBudgetAccount {
     sessionId: string,
     idempotencyKey: string,
     continuationDepth: number,
-    nowMs: number
+    nowMs: number,
+    retryCause?: "missing_backend_thread"
   ): BudgetAccountingEvent {
     const existing = this.snapshotValue.reservations.find(
       (reservation) => reservation.idempotencyKey === idempotencyKey
     );
     if (existing) {
-      if (existing.continuationDepth !== continuationDepth)
+      if (existing.continuationDepth !== continuationDepth || existing.retryCause !== retryCause)
         throw new Error("conflicting budget reservation replay");
       return budgetAccountingEventSchema.parse({
         kind: "budget_reserved",
@@ -205,6 +207,12 @@ export class ContinuationBudgetAccount {
         reason: "missing_thread_retry_limit",
         snapshot: this.snapshotValue
       });
+    const isSameDepthRetry =
+      this.snapshotValue.reservations.length > 0 && continuationDepth === priorDepth;
+    if (isSameDepthRetry && retryCause !== "missing_backend_thread")
+      throw new Error("same-depth retry requires a missing backend thread fact");
+    if (!isSameDepthRetry && retryCause)
+      throw new Error("missing backend thread fact only authorizes a same-depth retry");
     const exhausted = this.exhaustionReason(continuationDepth, nowMs);
     if (exhausted)
       return budgetAccountingEventSchema.parse({
@@ -228,7 +236,8 @@ export class ContinuationBudgetAccount {
           ? "initial"
           : continuationDepth === priorDepth
             ? "missing_thread_fresh"
-            : "continuation"
+            : "continuation",
+      retryCause
     });
     this.snapshotValue.reservations.push(reservation);
     return budgetAccountingEventSchema.parse({
@@ -358,6 +367,12 @@ function validateRestoredBudgetState(snapshot: ContinuationBudgetSnapshot): void
           : "continuation";
     if (reservation.invocationKind && reservation.invocationKind !== expectedKind)
       throw new Error("restored budget invocation kind conflicts with lineage");
+    if (
+      (expectedKind === "missing_thread_fresh" &&
+        reservation.retryCause !== "missing_backend_thread") ||
+      (expectedKind !== "missing_thread_fresh" && reservation.retryCause)
+    )
+      throw new Error("restored budget retry cause conflicts with lineage");
     if (
       reservation.reservedAtMs < previousReservedAtMs ||
       reservation.reservedAtMs >= snapshot.deadlineAtMs

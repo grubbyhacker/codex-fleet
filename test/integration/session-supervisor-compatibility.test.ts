@@ -284,7 +284,7 @@ describe("behavioral journal compatibility", () => {
     });
     const budgetDecision = budget.decideCompletion("session-1", 2_000);
     const verifierResult = {
-      outcome: "continuation" as const,
+      outcome: "missing_or_stale" as const,
       contractDigest: task.contractDigest,
       taskEvidenceDigest: task.taskEvidenceDigest,
       headRevision: "head-1",
@@ -486,6 +486,113 @@ describe("behavioral journal compatibility", () => {
       "lineage conflicts with its reservation"
     );
 
+    const continuationUsage = {
+      inputTokens: 4,
+      cachedInputTokens: 1,
+      outputTokens: 2,
+      reasoningOutputTokens: 1,
+      totalTokens: 6,
+      runtimeMs: 100
+    };
+    const continuationUsageEvent = budget.recordUsage("session-1", "attempt-2", continuationUsage);
+    const continuationResult = {
+      outcome: "satisfied" as const,
+      contractDigest: task.contractDigest,
+      taskEvidenceDigest: task.taskEvidenceDigest,
+      headRevision: "head-2",
+      reasons: [],
+      evidenceRefs: ["evidence-2"]
+    };
+    const continued = new CanonicalJournalReducer();
+    records.forEach((record) => continued.apply(record));
+    [
+      {
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 8,
+        transactionId: "authorize-2",
+        sessionId: "session-1",
+        event: {
+          kind: "effect_authorized",
+          payload: {
+            effectId: "attempt-2",
+            effectKind: "model_turn",
+            idempotencyKey: "continuation-1",
+            targetRef: "registered-input-2",
+            turnId: "turn-2",
+            parentTurnId: "turn-1",
+            fenceEpoch: 1,
+            task,
+            budgetEvent: continuationReservation
+          }
+        }
+      },
+      {
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 9,
+        transactionId: "complete-2",
+        sessionId: "session-1",
+        event: {
+          kind: "effect_completed",
+          payload: {
+            effectId: "attempt-2",
+            resultDigest: "8".repeat(64),
+            usage: continuationUsage,
+            budgetEvent: continuationUsageEvent
+          }
+        }
+      },
+      {
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 10,
+        transactionId: "verify-2",
+        sessionId: "session-1",
+        event: {
+          kind: "effect_authorized",
+          payload: {
+            effectId: "verifier-2",
+            effectKind: "verifier",
+            idempotencyKey: "verifier-2",
+            targetRef: "repository-state-2",
+            turnId: "turn-2",
+            fenceEpoch: 1,
+            task
+          }
+        }
+      },
+      {
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 11,
+        transactionId: "verify-complete-2",
+        sessionId: "session-1",
+        event: {
+          kind: "effect_completed",
+          payload: {
+            effectId: "verifier-2",
+            resultDigest: canonicalValueDigest(continuationResult)
+          }
+        }
+      },
+      {
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 12,
+        transactionId: "completion-2",
+        sessionId: "session-1",
+        event: {
+          kind: "completion_decided",
+          payload: {
+            turnId: "turn-2",
+            task,
+            verifierResult: continuationResult,
+            budgetDecision: budget.decideCompletion("session-1", 2_500),
+            decidedAtMs: 2_500
+          }
+        }
+      }
+    ]
+      .map((record) => canonicalJournalRecordSchema.parse(record))
+      .forEach((record) => continued.apply(record));
+    expect(continued.snapshot().sessions["session-1"]?.completionDecisions).toHaveLength(2);
+
     const fenced = new CanonicalJournalReducer();
     fenced.apply(records[0]!);
     fenced.apply(records[1]!);
@@ -612,6 +719,75 @@ describe("behavioral journal compatibility", () => {
         })
       )
     ).toThrow("already initialized");
+
+    const retryBudget = new ContinuationBudgetAccount(policy, 1_000);
+    const firstReservation = retryBudget.reserveTurn("session-1", "retry-first", 0, 1_100);
+    const freshReservation = retryBudget.reserveTurn(
+      "session-1",
+      "retry-fresh",
+      0,
+      1_200,
+      "missing_backend_thread"
+    );
+    const firstAuthorization = canonicalJournalRecordSchema.parse({
+      ...records[1],
+      transactionId: "retry-first",
+      event: {
+        kind: "effect_authorized",
+        payload: {
+          ...records[1]!.event.payload,
+          effectId: "retry-attempt-1",
+          idempotencyKey: "retry-first",
+          budgetEvent: firstReservation
+        }
+      }
+    });
+    const freshAuthorization = canonicalJournalRecordSchema.parse({
+      ...records[1],
+      cursor: 3,
+      transactionId: "retry-fresh",
+      event: {
+        kind: "effect_authorized",
+        payload: {
+          ...records[1]!.event.payload,
+          effectId: "retry-attempt-2",
+          idempotencyKey: "retry-fresh",
+          budgetEvent: freshReservation
+        }
+      }
+    });
+    const missingThreadCompletion = canonicalJournalRecordSchema.parse({
+      version: SESSION_JOURNAL_VERSION,
+      cursor: 3,
+      transactionId: "retry-missing-thread",
+      sessionId: "session-1",
+      event: {
+        kind: "effect_completed",
+        payload: {
+          effectId: "retry-attempt-1",
+          resultDigest: "9".repeat(64),
+          runtimeOutcome: "missing_backend_thread"
+        }
+      }
+    });
+    const unauthorizedRetry = new CanonicalJournalReducer();
+    unauthorizedRetry.apply(records[0]!);
+    unauthorizedRetry.apply(firstAuthorization);
+    expect(() => unauthorizedRetry.apply(freshAuthorization)).toThrow(
+      "lacks a completed missing backend thread predecessor"
+    );
+    const authorizedRetry = new CanonicalJournalReducer();
+    authorizedRetry.apply(records[0]!);
+    authorizedRetry.apply(firstAuthorization);
+    authorizedRetry.apply(missingThreadCompletion);
+    expect(() =>
+      authorizedRetry.apply(
+        canonicalJournalRecordSchema.parse({
+          ...freshAuthorization,
+          cursor: 4
+        })
+      )
+    ).not.toThrow();
   });
 
   test("requires exact atomic usage accounting and preserves janitor targets", () => {

@@ -158,6 +158,7 @@ const effectCompletionSchema = z
   .object({
     effectId: id,
     resultDigest: sha256Hex,
+    runtimeOutcome: z.enum(["completed", "missing_backend_thread"]).optional(),
     resultRef: opaqueRef.optional(),
     conversation: canonicalConversationSchema.optional(),
     usage: canonicalUsageSchema.optional(),
@@ -165,6 +166,16 @@ const effectCompletionSchema = z
   })
   .strict()
   .superRefine((completion, context) => {
+    if (
+      completion.runtimeOutcome === "missing_backend_thread" &&
+      (completion.usage || completion.budgetEvent)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "a missing backend thread cannot report model usage"
+      });
+      return;
+    }
     if (!completion.usage) {
       if (completion.budgetEvent)
         context.addIssue({
@@ -480,6 +491,7 @@ export class CanonicalJournalReducer {
               event.payload.idempotencyKey !== event.payload.budgetEvent.reservation.idempotencyKey
             )
               throw new Error("canonical model effect and reservation identities conflict");
+            validateRetryAuthorization(next, event.payload);
             validateAndStoreReservation(next, record.sessionId, event.payload);
           }
         } else {
@@ -521,9 +533,14 @@ export class CanonicalJournalReducer {
         if (authorization.effectKind !== "model_turn" && event.payload.usage)
           throw new Error("only a model turn effect may record model usage");
         if (authorization.effectKind === "model_turn" && authorization.turnId) {
-          if (!event.payload.usage || event.payload.budgetEvent?.kind !== "usage_recorded")
+          if (event.payload.runtimeOutcome === "missing_backend_thread") {
+            if (event.payload.usage || event.payload.budgetEvent)
+              throw new Error("missing backend thread completion cannot record usage");
+          } else if (!event.payload.usage || event.payload.budgetEvent?.kind !== "usage_recorded") {
             throw new Error("canonical model completion requires exact atomic usage");
-          validateAndStoreUsage(next, record.sessionId, authorization, event.payload);
+          } else {
+            validateAndStoreUsage(next, record.sessionId, authorization, event.payload);
+          }
         }
         next.completedEffects.push(event.payload);
         break;
@@ -542,7 +559,7 @@ export class CanonicalJournalReducer {
           const modelAuthorization = next.authorizedEffects.find(
             (effect) =>
               effect.effectKind === "model_turn" &&
-              effect.turnId &&
+              effect.turnId === event.payload.turnId &&
               sameTask(effect.task, event.payload.task)
           );
           if (!modelAuthorization && compatibleAuthorization) {
@@ -671,6 +688,34 @@ function sameTask(
   return !!left && JSON.stringify(left) === JSON.stringify(right);
 }
 
+function validateRetryAuthorization(
+  snapshot: CanonicalSessionSnapshot,
+  authorization: EffectAuthorization
+): void {
+  const reservation = authorization.budgetEvent;
+  if (reservation?.kind !== "budget_reserved") return;
+  if (reservation.reservation.retryCause !== "missing_backend_thread") return;
+  let predecessor: EffectAuthorization | undefined;
+  for (let index = snapshot.authorizedEffects.length - 1; index >= 0; index -= 1) {
+    const candidate = snapshot.authorizedEffects[index]!;
+    if (
+      candidate.effectKind === "model_turn" &&
+      sameTask(candidate.task, authorization.task!) &&
+      candidate.budgetEvent?.kind === "budget_reserved" &&
+      candidate.budgetEvent.reservation.continuationDepth ===
+        reservation.reservation.continuationDepth
+    ) {
+      predecessor = candidate;
+      break;
+    }
+  }
+  const predecessorCompletion = predecessor
+    ? snapshot.completedEffects.find((completion) => completion.effectId === predecessor.effectId)
+    : undefined;
+  if (predecessorCompletion?.runtimeOutcome !== "missing_backend_thread")
+    throw new Error("same-depth retry lacks a completed missing backend thread predecessor");
+}
+
 function validateAndStoreReservation(
   snapshot: CanonicalSessionSnapshot,
   sessionId: string,
@@ -689,7 +734,8 @@ function validateAndStoreReservation(
     sessionId,
     event.reservation.idempotencyKey,
     event.reservation.continuationDepth,
-    event.reservation.reservedAtMs
+    event.reservation.reservedAtMs,
+    event.reservation.retryCause
   );
   if (JSON.stringify(expected) !== JSON.stringify(event))
     throw new Error("canonical reservation conflicts with cumulative budget state");
@@ -788,7 +834,8 @@ function validateAndStoreContinuationReservation(
     (candidate) =>
       candidate.turnId === continuation.sourceTurnId &&
       sameTask(candidate.task, task) &&
-      candidate.verifierResult.outcome === "continuation"
+      (candidate.verifierResult.outcome === "continuation" ||
+        candidate.verifierResult.outcome === "missing_or_stale")
   );
   if (
     !verifierAuthorization ||
@@ -803,7 +850,8 @@ function validateAndStoreContinuationReservation(
     sessionId,
     event.reservation.idempotencyKey,
     event.reservation.continuationDepth,
-    event.reservation.reservedAtMs
+    event.reservation.reservedAtMs,
+    event.reservation.retryCause
   );
   if (JSON.stringify(expected) !== JSON.stringify(event))
     throw new Error("continuation reservation conflicts with cumulative budget state");

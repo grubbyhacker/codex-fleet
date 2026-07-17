@@ -80,7 +80,16 @@ describe("registered continuation budget accounting", () => {
   it("reserves a missing-thread fresh invocation without inventing a continuation", () => {
     const account = new ContinuationBudgetAccount(policy, 1_000);
     account.reserveTurn("session-1", "initial", 0, 1_100);
-    const fresh = account.reserveTurn("session-1", "missing-thread-fresh", 0, 1_200);
+    expect(() => account.reserveTurn("session-1", "unauthorized-fresh", 0, 1_200)).toThrow(
+      "requires a missing backend thread fact"
+    );
+    const fresh = account.reserveTurn(
+      "session-1",
+      "missing-thread-fresh",
+      0,
+      1_200,
+      "missing_backend_thread"
+    );
     expect(fresh).toMatchObject({
       kind: "budget_reserved",
       reservation: { turnOrdinal: 2, continuationDepth: 0 }
@@ -92,8 +101,10 @@ describe("registered continuation budget accounting", () => {
 
     const wider = new ContinuationBudgetAccount({ ...policy, maxModelTurns: 5 }, 1_000);
     wider.reserveTurn("session-1", "initial", 0, 1_100);
-    wider.reserveTurn("session-1", "missing-thread-fresh", 0, 1_200);
-    expect(wider.reserveTurn("session-1", "second-fresh", 0, 1_300)).toMatchObject({
+    wider.reserveTurn("session-1", "missing-thread-fresh", 0, 1_200, "missing_backend_thread");
+    expect(
+      wider.reserveTurn("session-1", "second-fresh", 0, 1_300, "missing_backend_thread")
+    ).toMatchObject({
       kind: "budget_exhausted",
       reason: "missing_thread_retry_limit"
     });
