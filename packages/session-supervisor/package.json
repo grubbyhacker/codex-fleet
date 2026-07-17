@@ -1,6 +1,6 @@
 {
   "name": "@grubbyhacker/session-supervisor",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Backend-neutral durable session, completion, budget, and reassignment contracts.",
   "license": "MIT",
   "type": "module",

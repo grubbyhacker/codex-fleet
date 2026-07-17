@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 
 import {
+  CanonicalJournalReducer,
+  ContinuationBudgetAccount,
   LegacyAgentdV1JournalReader,
   LegacyDeferredVerifierAdapter,
   SESSION_JOURNAL_VERSION,
@@ -241,5 +243,247 @@ describe("behavioral journal compatibility", () => {
         }
       })
     ).toThrow();
+  });
+
+  test("replays new runtime state from canonical records alone and rejects late completion", () => {
+    const policy = {
+      maxContinuations: 1,
+      maxModelTurns: 2,
+      wallClockDeadlineMs: 60_000,
+      maxTotalTokens: 100,
+      maxRuntimeMs: 10_000,
+      perTurnTimeoutMs: 8_000
+    } as const;
+    const task = {
+      taskKind: "repository_change_v1",
+      completionContract: "repository_state_v1",
+      verifierId: "repository_state_v1",
+      contractDigest: `sha256:${"a".repeat(64)}`,
+      parameters: { repositoryId: "neutral" },
+      taskEvidenceDigest: `sha256:${"b".repeat(64)}`,
+      budget: policy
+    };
+    const budget = new ContinuationBudgetAccount(policy, 1_000);
+    const reservation = budget.reserveTurn("session-1", "model-1", 0, 1_100);
+    const usage = {
+      inputTokens: 10,
+      cachedInputTokens: 3,
+      outputTokens: 5,
+      reasoningOutputTokens: 2,
+      totalTokens: 15,
+      runtimeMs: 250
+    };
+    const usageEvent = budget.recordUsage("session-1", "attempt-1", {
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      totalTokens: usage.totalTokens,
+      runtimeMs: usage.runtimeMs
+    });
+    const records = [
+      {
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 1,
+        transactionId: "open-1",
+        sessionId: "session-1",
+        event: {
+          kind: "session_opened",
+          payload: {
+            coordinatorBinding: "coordinator",
+            authorityBinding: "authority",
+            workerBinding: "worker-1",
+            storageLineageId: "storage-1",
+            fenceEpoch: 1,
+            sessionLineageId: "lineage-1",
+            workspace: { workspaceRef: "workspace-1", uid: 20000, gid: 20000 }
+          }
+        }
+      },
+      {
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 2,
+        transactionId: "authorize-1",
+        sessionId: "session-1",
+        event: {
+          kind: "effect_authorized",
+          payload: {
+            effectId: "attempt-1",
+            effectKind: "model_turn",
+            idempotencyKey: "model-1",
+            targetRef: "registered-input-1",
+            turnId: "turn-1",
+            task,
+            budgetEvent: reservation
+          }
+        }
+      },
+      {
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 3,
+        transactionId: "complete-1",
+        sessionId: "session-1",
+        event: {
+          kind: "effect_completed",
+          payload: {
+            effectId: "attempt-1",
+            resultDigest: "c".repeat(64),
+            resultRef: "result-1",
+            conversation: {
+              adapterKind: "codex",
+              adapterVersion: "0.144.5",
+              backendThreadRef: "thread-1"
+            },
+            usage,
+            budgetEvent: usageEvent
+          }
+        }
+      }
+    ].map((record) => canonicalJournalRecordSchema.parse(record));
+
+    const live = new CanonicalJournalReducer();
+    records.forEach((record) => live.apply(record));
+    const replay = new CanonicalJournalReducer();
+    records.forEach((record) => replay.apply(record));
+    expect(replay.snapshot()).toEqual(live.snapshot());
+    expect(replay.snapshot().sessions["session-1"]?.completedEffects[0]).toMatchObject({
+      resultRef: "result-1",
+      conversation: { backendThreadRef: "thread-1" },
+      usage
+    });
+
+    replay.apply(
+      canonicalJournalRecordSchema.parse({
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 4,
+        transactionId: "terminal-1",
+        sessionId: "session-1",
+        event: {
+          kind: "turn_terminal",
+          payload: { turnId: "turn-1", reason: "fenced", relatedEffectId: "attempt-1" }
+        }
+      })
+    );
+    expect(() =>
+      replay.apply(
+        canonicalJournalRecordSchema.parse({
+          version: SESSION_JOURNAL_VERSION,
+          cursor: 5,
+          transactionId: "late-complete",
+          sessionId: "session-1",
+          event: {
+            kind: "effect_completed",
+            payload: { effectId: "attempt-1", resultDigest: "d".repeat(64) }
+          }
+        })
+      )
+    ).toThrow("canonical turn is terminal");
+
+    const multiSession = new CanonicalJournalReducer();
+    multiSession.apply(records[0]!);
+    multiSession.apply(
+      canonicalJournalRecordSchema.parse({
+        ...records[0],
+        cursor: 2,
+        transactionId: "open-2",
+        sessionId: "session-2",
+        event: {
+          kind: "session_opened",
+          payload: { ...records[0]!.event.payload, sessionLineageId: "lineage-2" }
+        }
+      })
+    );
+    expect(Object.keys(multiSession.snapshot().sessions).sort()).toEqual([
+      "session-1",
+      "session-2"
+    ]);
+    expect(() =>
+      multiSession.apply(
+        canonicalJournalRecordSchema.parse({
+          ...records[0],
+          cursor: 3,
+          transactionId: "conflicting-reopen"
+        })
+      )
+    ).toThrow("already initialized");
+  });
+
+  test("requires exact atomic usage accounting and preserves janitor targets", () => {
+    const base = {
+      version: SESSION_JOURNAL_VERSION,
+      cursor: 1,
+      transactionId: "transaction-1",
+      sessionId: "session-1"
+    } as const;
+    expect(() =>
+      canonicalJournalRecordSchema.parse({
+        ...base,
+        event: {
+          kind: "effect_completed",
+          payload: {
+            effectId: "attempt-1",
+            resultDigest: "a".repeat(64),
+            usage: {
+              inputTokens: 1,
+              cachedInputTokens: 0,
+              outputTokens: 1,
+              reasoningOutputTokens: 0,
+              totalTokens: 2,
+              runtimeMs: 1
+            }
+          }
+        }
+      })
+    ).toThrow("requires an atomic usage_recorded budget event");
+
+    const reducer = new CanonicalJournalReducer();
+    reducer.apply(
+      canonicalJournalRecordSchema.parse({
+        ...base,
+        event: {
+          kind: "session_opened",
+          payload: {
+            coordinatorBinding: "coordinator",
+            authorityBinding: "authority",
+            workerBinding: "worker-1",
+            storageLineageId: "storage-1",
+            fenceEpoch: 1,
+            sessionLineageId: "lineage-1",
+            workspace: { workspaceRef: "workspace-1", uid: 1, gid: 1 }
+          }
+        }
+      })
+    );
+    reducer.apply(
+      canonicalJournalRecordSchema.parse({
+        ...base,
+        cursor: 2,
+        transactionId: "plan-1",
+        event: {
+          kind: "janitor_planned",
+          payload: {
+            planId: "plan-1",
+            repositoryRef: "repository-1",
+            exactTargets: ["workspace-1"],
+            classification: "clean_disposable"
+          }
+        }
+      })
+    );
+    expect(() =>
+      reducer.apply(
+        canonicalJournalRecordSchema.parse({
+          ...base,
+          cursor: 3,
+          transactionId: "apply-1",
+          event: {
+            kind: "janitor_applied",
+            payload: {
+              planId: "plan-1",
+              repositoryRef: "repository-1",
+              exactTargets: ["workspace-1", "unplanned"]
+            }
+          }
+        })
+      )
+    ).toThrow("widens or changes its plan");
   });
 });

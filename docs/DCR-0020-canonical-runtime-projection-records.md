@@ -1,0 +1,62 @@
+# DCR-0020: Canonical runtime and projection records
+
+Status: Accepted
+Date: 2026-07-17
+
+## Context
+
+DCR-0019 makes `session-supervisor/journal/v2` the sole durable authority and
+allows consumer transport APIs to change. Consumer compilation against 2.0.0
+found three places where its strict schema could not truthfully preserve the
+normative behavior:
+
+- a new canonical journal could authorize effects but could not record the
+  durable session identity needed to interpret those effects after restart;
+- an effect completion could bind a digest but not the opaque result reference
+  or backend conversation identity used by the consumer projection; and
+- exact usage and its cumulative budget update could not be committed in the
+  same completion transaction.
+
+Using a second consumer event log would make that log authoritative. Encoding
+transport events as unrelated canonical effect kinds would make the journal
+syntactically valid but semantically false. Both violate DCR-0019.
+
+## Decision
+
+The journal-v2 vocabulary gains additive, strict records for the missing
+durable facts:
+
+- `session_opened` records immutable session, worker, lineage, and workspace
+  identity. It does not grant provider, repository, or credential authority.
+- `session_checkpointed` records an opaque checkpoint reference.
+- `session_terminal` and `turn_terminal` record cancellation or termination so
+  replay and late-result rejection do not depend on a transport log.
+- `effect_completed` may carry an opaque result reference, backend conversation
+  identity, exact six-dimensional usage, and the matching cumulative
+  `usage_recorded` budget event in one record.
+
+The model-turn authorization remains the source of task, reservation, and
+idempotency authority. Registered task parameters and opaque references remain
+the durable input; the package does not add caller-selected commands, provider
+configuration, credentials, URLs, mounts, or shell authority.
+
+Consumers reconstruct their transport view from canonical records. A consumer
+may name a temporary projection adapter, but it may not persist another
+authoritative event stream.
+
+## Compatibility matrix amendment
+
+| Required behavior                                          | 2.0.0 gap                               | Canonical record                                            | Required negative proof                                           |
+| ---------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------- |
+| Restart interprets new effects in the same logical session | No new-session record                   | `session_opened`                                            | Effect before open and conflicting reopen fail closed             |
+| Checkpoint and terminal authority survive restart          | No canonical terminal/checkpoint record | `session_checkpointed`, `session_terminal`, `turn_terminal` | Late completion after terminal fails closed                       |
+| Exact result and conversation identity survive replay      | Completion carried only a digest        | Extended `effect_completed`                                 | Digest/reference or conversation conflict fails closed            |
+| Usage and cumulative budget are atomic                     | No legal post-completion budget update  | `effect_completed.usage` plus matching `usage_recorded`     | Missing, mismatched, duplicate, and conflicting usage fail closed |
+| Transport compatibility is non-authoritative               | Consumer needed a second event log      | Canonical reducer projection                                | Restart from canonical records alone produces the same view       |
+
+## Consequences
+
+This is an additive 2.x package release and keeps the journal version at v2.
+Older exact package locks continue to read records they produced; they fail
+closed on newer event kinds as designed. Consumers that emit the new records
+must update their exact package lock first.

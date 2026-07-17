@@ -66,18 +66,53 @@ const importedStatePayloadSchema = z
   })
   .strict();
 
+export const canonicalConversationSchema = z
+  .object({
+    adapterKind: id,
+    adapterVersion: id,
+    backendThreadRef: opaqueRef
+  })
+  .strict();
+
+export const canonicalSessionOpenedSchema = z
+  .object({
+    coordinatorBinding: opaqueRef,
+    authorityBinding: opaqueRef,
+    workerBinding: opaqueRef,
+    storageLineageId: opaqueRef,
+    fenceEpoch: z.number().int().positive(),
+    sessionLineageId: opaqueRef,
+    workspace: z
+      .object({
+        workspaceRef: opaqueRef,
+        uid: z.number().int().nonnegative(),
+        gid: z.number().int().nonnegative(),
+        branchRef: opaqueRef.optional(),
+        checkpointRef: opaqueRef.optional()
+      })
+      .strict()
+  })
+  .strict();
+
 const effectAuthorizationSchema = z
   .object({
     effectId: id,
     effectKind: z.enum(["model_turn", "verifier", "adoption", "janitor"]),
     idempotencyKey: id,
     targetRef: opaqueRef,
+    turnId: id.optional(),
+    parentTurnId: id.optional(),
     task: registeredTaskSnapshotSchema.optional(),
     budgetEvent: budgetAccountingEventSchema.optional()
   })
   .strict()
   .superRefine((authorization, context) => {
     if (authorization.effectKind === "model_turn") {
+      if (!authorization.turnId)
+        context.addIssue({
+          code: "custom",
+          message: "model turn authorization requires a durable turn identity"
+        });
       if (authorization.budgetEvent?.kind !== "budget_reserved")
         context.addIssue({
           code: "custom",
@@ -94,10 +129,22 @@ const effectAuthorizationSchema = z
         message: "only a model turn authorization may carry a budget reservation"
       });
     }
-    if (authorization.effectKind === "verifier" && !authorization.task)
+    if (authorization.effectKind === "verifier") {
+      if (!authorization.task)
+        context.addIssue({
+          code: "custom",
+          message: "verifier authorization requires a registered task"
+        });
+      if (!authorization.turnId)
+        context.addIssue({
+          code: "custom",
+          message: "verifier authorization requires a durable turn identity"
+        });
+    }
+    if (authorization.parentTurnId && !authorization.turnId)
       context.addIssue({
         code: "custom",
-        message: "verifier authorization requires a registered task"
+        message: "a parent turn requires a durable turn identity"
       });
     if (
       (authorization.effectKind === "adoption" || authorization.effectKind === "janitor") &&
@@ -113,9 +160,40 @@ const effectCompletionSchema = z
   .object({
     effectId: id,
     resultDigest: sha256Hex,
-    usage: canonicalUsageSchema.optional()
+    resultRef: opaqueRef.optional(),
+    conversation: canonicalConversationSchema.optional(),
+    usage: canonicalUsageSchema.optional(),
+    budgetEvent: budgetAccountingEventSchema.optional()
   })
-  .strict();
+  .strict()
+  .superRefine((completion, context) => {
+    if (!completion.usage) {
+      if (completion.budgetEvent)
+        context.addIssue({
+          code: "custom",
+          message: "a completion without usage cannot update the usage budget"
+        });
+      return;
+    }
+    if (completion.budgetEvent?.kind !== "usage_recorded") {
+      context.addIssue({
+        code: "custom",
+        message: "a completion with usage requires an atomic usage_recorded budget event"
+      });
+      return;
+    }
+    const accounted = completion.budgetEvent.usage;
+    if (
+      accounted.inputTokens !== completion.usage.inputTokens ||
+      accounted.outputTokens !== completion.usage.outputTokens ||
+      accounted.totalTokens !== completion.usage.totalTokens ||
+      accounted.runtimeMs !== completion.usage.runtimeMs
+    )
+      context.addIssue({
+        code: "custom",
+        message: "completion usage conflicts with its budget event"
+      });
+  });
 
 const completionDecisionSchema = z
   .object({
@@ -149,8 +227,38 @@ const janitorPlanSchema = z
   })
   .strict();
 
-const canonicalEventSchema = z.discriminatedUnion("kind", [
+export const canonicalEventSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("state_imported"), payload: importedStatePayloadSchema }).strict(),
+  z.object({ kind: z.literal("session_opened"), payload: canonicalSessionOpenedSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("session_checkpointed"),
+      payload: z.object({ checkpointRef: opaqueRef }).strict()
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("session_terminal"),
+      payload: z
+        .object({
+          reason: z.enum(["terminated", "cancelled", "fenced"]),
+          relatedEffectId: id.optional()
+        })
+        .strict()
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("turn_terminal"),
+      payload: z
+        .object({
+          turnId: id,
+          reason: z.enum(["cancelled", "failed", "fenced", "timed_out"]),
+          relatedEffectId: id.optional()
+        })
+        .strict()
+    })
+    .strict(),
   z.object({ kind: z.literal("effect_authorized"), payload: effectAuthorizationSchema }).strict(),
   z.object({ kind: z.literal("effect_completed"), payload: effectCompletionSchema }).strict(),
   z
@@ -188,8 +296,225 @@ export const canonicalJournalRecordSchema = z
     source: sourceRecordSchema.optional(),
     event: canonicalEventSchema
   })
-  .strict();
+  .strict()
+  .superRefine((record, context) => {
+    if (record.event.kind !== "state_imported" && record.source)
+      context.addIssue({
+        code: "custom",
+        message: "new canonical events cannot claim a legacy source"
+      });
+  });
 export type CanonicalJournalRecord = z.infer<typeof canonicalJournalRecordSchema>;
+
+type CanonicalEvent = z.infer<typeof canonicalEventSchema>;
+
+export type CanonicalSessionSnapshot = {
+  opened?: z.infer<typeof canonicalSessionOpenedSchema>;
+  importedState?: z.infer<typeof importedStatePayloadSchema>;
+  checkpointRef?: string;
+  terminal?: Extract<CanonicalEvent, { kind: "session_terminal" }>["payload"];
+  authorizedEffects: Array<Extract<CanonicalEvent, { kind: "effect_authorized" }>["payload"]>;
+  completedEffects: Array<Extract<CanonicalEvent, { kind: "effect_completed" }>["payload"]>;
+  terminalTurns: Array<Extract<CanonicalEvent, { kind: "turn_terminal" }>["payload"]>;
+  completionDecisions: Array<Extract<CanonicalEvent, { kind: "completion_decided" }>["payload"]>;
+  continuations: Array<Extract<CanonicalEvent, { kind: "continuation_linked" }>["payload"]>;
+  adoptions: Array<Extract<CanonicalEvent, { kind: "session_adopted" }>["payload"]>;
+  janitorPlans: Array<Extract<CanonicalEvent, { kind: "janitor_planned" }>["payload"]>;
+  janitorApplications: Array<Extract<CanonicalEvent, { kind: "janitor_applied" }>["payload"]>;
+  reconciliations: Array<Extract<CanonicalEvent, { kind: "reconciliation_required" }>["payload"]>;
+};
+
+export type CanonicalJournalSnapshot = {
+  nextCursor: number;
+  sessions: Record<string, CanonicalSessionSnapshot>;
+};
+
+function emptyCanonicalSession(): CanonicalSessionSnapshot {
+  return {
+    authorizedEffects: [],
+    completedEffects: [],
+    terminalTurns: [],
+    completionDecisions: [],
+    continuations: [],
+    adoptions: [],
+    janitorPlans: [],
+    janitorApplications: [],
+    reconciliations: []
+  };
+}
+
+/** Pure fail-closed reducer shared by live append and replay consumers. */
+export class CanonicalJournalReducer {
+  private state: CanonicalJournalSnapshot = {
+    nextCursor: 1,
+    sessions: {}
+  };
+
+  snapshot(): CanonicalJournalSnapshot {
+    return structuredClone(this.state);
+  }
+
+  apply(raw: CanonicalJournalRecord): CanonicalJournalSnapshot {
+    const record = canonicalJournalRecordSchema.parse(raw);
+    if (record.cursor !== this.state.nextCursor)
+      throw new Error("canonical journal cursor is not the next contiguous cursor");
+    const journalNext = structuredClone(this.state);
+    const next = structuredClone(journalNext.sessions[record.sessionId] ?? emptyCanonicalSession());
+    const event = record.event;
+    switch (event.kind) {
+      case "state_imported":
+        if (
+          next.opened ||
+          next.authorizedEffects.length > 0 ||
+          next.completedEffects.length > 0 ||
+          next.completionDecisions.length > 0 ||
+          next.continuations.length > 0 ||
+          next.adoptions.length > 0 ||
+          next.janitorPlans.length > 0
+        )
+          throw new Error("legacy state cannot be imported after new canonical work");
+        next.importedState = event.payload;
+        break;
+      case "session_opened":
+        if (next.opened || next.importedState)
+          throw new Error("canonical session state is already initialized");
+        next.opened = event.payload;
+        break;
+      case "session_checkpointed":
+        assertInitialized(next);
+        assertNonterminal(next);
+        next.checkpointRef = event.payload.checkpointRef;
+        break;
+      case "session_terminal":
+        assertInitialized(next);
+        if (next.terminal) throw new Error("canonical session is already terminal");
+        next.terminal = event.payload;
+        break;
+      case "turn_terminal":
+        assertInitialized(next);
+        if (next.terminalTurns.some((turn) => turn.turnId === event.payload.turnId))
+          throw new Error("canonical turn is already terminal");
+        next.terminalTurns.push(event.payload);
+        break;
+      case "effect_authorized":
+        assertInitialized(next);
+        assertNonterminal(next);
+        if (next.authorizedEffects.some((effect) => effect.effectId === event.payload.effectId))
+          throw new Error("canonical effect identity is already authorized");
+        if (
+          next.authorizedEffects.some(
+            (effect) => effect.idempotencyKey === event.payload.idempotencyKey
+          )
+        )
+          throw new Error("canonical effect idempotency key is already authorized");
+        next.authorizedEffects.push(event.payload);
+        break;
+      case "effect_completed": {
+        assertInitialized(next);
+        assertNonterminal(next);
+        const authorization = next.authorizedEffects.find(
+          (effect) => effect.effectId === event.payload.effectId
+        );
+        if (!authorization) throw new Error("canonical effect completion lacks authorization");
+        if (
+          authorization.turnId &&
+          next.terminalTurns.some((turn) => turn.turnId === authorization.turnId)
+        )
+          throw new Error("canonical turn is terminal");
+        if (next.completedEffects.some((effect) => effect.effectId === event.payload.effectId))
+          throw new Error("canonical effect is already completed");
+        if (
+          event.payload.budgetEvent?.kind === "usage_recorded" &&
+          event.payload.budgetEvent.attemptId !== event.payload.effectId
+        )
+          throw new Error("canonical usage is bound to a different effect identity");
+        if (authorization.effectKind !== "model_turn" && event.payload.usage)
+          throw new Error("only a model turn effect may record model usage");
+        next.completedEffects.push(event.payload);
+        break;
+      }
+      case "reconciliation_required":
+        assertInitialized(next);
+        next.reconciliations.push(event.payload);
+        break;
+      case "completion_decided":
+        assertInitialized(next);
+        assertNonterminal(next);
+        if (
+          !next.authorizedEffects.some(
+            (effect) =>
+              effect.task?.contractDigest === event.payload.task.contractDigest &&
+              effect.task.taskEvidenceDigest === event.payload.task.taskEvidenceDigest
+          )
+        )
+          throw new Error("completion decision lacks matching registered task authorization");
+        next.completionDecisions.push(event.payload);
+        break;
+      case "continuation_linked":
+        assertInitialized(next);
+        assertNonterminal(next);
+        if (
+          next.continuations.some(
+            (continuation) =>
+              continuation.sourceTurnId === event.payload.sourceTurnId ||
+              continuation.continuationTurnId === event.payload.continuationTurnId
+          )
+        )
+          throw new Error("canonical continuation identity is already linked");
+        next.continuations.push(event.payload);
+        break;
+      case "session_adopted":
+        assertInitialized(next);
+        assertNonterminal(next);
+        next.adoptions.push(event.payload);
+        break;
+      case "janitor_planned":
+        assertInitialized(next);
+        if (next.janitorPlans.some((plan) => plan.planId === event.payload.planId))
+          throw new Error("canonical janitor plan identity already exists");
+        next.janitorPlans.push(event.payload);
+        break;
+      case "janitor_applied": {
+        const plan = next.janitorPlans.find(
+          (candidate) => candidate.planId === event.payload.planId
+        );
+        if (!plan) throw new Error("canonical janitor application lacks a plan");
+        if (
+          plan.repositoryRef !== event.payload.repositoryRef ||
+          JSON.stringify(plan.exactTargets) !== JSON.stringify(event.payload.exactTargets)
+        )
+          throw new Error("canonical janitor application widens or changes its plan");
+        if (plan.classification !== "clean_disposable")
+          throw new Error("canonical janitor application is not authorized by classification");
+        if (next.janitorApplications.some((applied) => applied.planId === event.payload.planId))
+          throw new Error("canonical janitor plan is already applied");
+        next.janitorApplications.push(event.payload);
+        break;
+      }
+    }
+    journalNext.sessions[record.sessionId] = next;
+    journalNext.nextCursor += 1;
+    this.state = journalNext;
+    return this.snapshot();
+  }
+}
+
+export function reduceCanonicalJournal(
+  records: readonly CanonicalJournalRecord[]
+): CanonicalJournalSnapshot {
+  const reducer = new CanonicalJournalReducer();
+  for (const record of records) reducer.apply(record);
+  return reducer.snapshot();
+}
+
+function assertInitialized(snapshot: CanonicalSessionSnapshot): void {
+  if (!snapshot.opened && !snapshot.importedState)
+    throw new Error("canonical session is not initialized");
+}
+
+function assertNonterminal(snapshot: CanonicalSessionSnapshot): void {
+  if (snapshot.terminal) throw new Error("canonical session is terminal");
+}
 
 export const journalMigrationManifestSchema = z
   .object({

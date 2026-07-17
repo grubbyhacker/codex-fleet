@@ -18,6 +18,13 @@ authorization, completion, reconciliation, registered completion,
 continuation, adoption, and two-phase janitorial transitions. Unknown versions
 and event kinds fail closed.
 
+New-session identity, checkpoint and terminal authority are canonical records,
+not consumer transport events. Effect completion atomically binds the opaque
+result reference, backend conversation identity, exact token/runtime usage,
+and its cumulative budget update. `CanonicalJournalReducer` is the shared pure
+live/replay reducer; consumers may project an HTTP view from its snapshot but
+must not maintain a second authoritative event log.
+
 `LegacyAgentdV1JournalReader` strictly verifies and parses immutable legacy
 rows before `migrateLegacyAgentdV1Journal` produces deterministic canonical
 state snapshots and a source/target digest manifest. Legacy unregistered
