@@ -45,6 +45,8 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
+      - name: Fetch immutable annotated release tag object
+        run: git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
       - run: bun run verify:session-supervisor-release
       - run: bun run --cwd packages/session-supervisor build
       - run: bun publish --cwd packages/session-supervisor --access restricted
