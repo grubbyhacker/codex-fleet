@@ -10,6 +10,22 @@ management, credentials, provider selection, host shell authority, transport,
 storage, runtime adapters, verifier implementations, or janitorial execution.
 Those remain responsibilities of the consuming system.
 
+## Behavioral compatibility and journal migration
+
+The canonical persisted contract is `session-supervisor/journal/v2`. It is
+independent of a consumer transport API and records atomic effect
+authorization, completion, reconciliation, registered completion,
+continuation, adoption, and two-phase janitorial transitions. Unknown versions
+and event kinds fail closed.
+
+`LegacyAgentdV1JournalReader` strictly verifies and parses immutable legacy
+rows before `migrateLegacyAgentdV1Journal` produces deterministic canonical
+state snapshots and a source/target digest manifest. Legacy unregistered
+verifier outcomes and unresolved effects become reconciliation state; the
+migration never infers a successful verifier, a missing reservation, or cleanup
+authority. Adapter responsibilities and deletion gates are recorded in
+DCR-0019.
+
 ## Registered completion
 
 `RegisteredTaskRegistry` compiles each task kind to one strict parameter schema,

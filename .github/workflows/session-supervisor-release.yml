@@ -9,6 +9,7 @@ on:
       - packages/session-supervisor/**
       - scripts/verify-session-supervisor-release.ts
       - test/integration/registered-contracts.test.ts
+      - test/integration/session-supervisor-compatibility.test.ts
       - test/schema/registered-contracts.test.ts
   push:
     tags:
@@ -49,6 +50,6 @@ jobs:
         run: git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
       - run: bun run verify:session-supervisor-release
       - run: bun run --cwd packages/session-supervisor build
-      - run: bun publish --cwd packages/session-supervisor --access restricted
+      - run: bun publish --cwd packages/session-supervisor --access restricted --registry https://npm.pkg.github.com
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.GITHUB_TOKEN }}

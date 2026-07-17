@@ -1,6 +1,6 @@
 # DCR-0018: Registered completion and compiled session supervisor
 
-Status: Accepted
+Status: Accepted; API compatibility policy superseded by DCR-0019
 Date: 2026-07-16
 
 ## Context
@@ -12,9 +12,9 @@ narrow daemon-owned repair loop for Fleet delivery hygiene. The session
 supervisor spike later demonstrated a smaller backend-neutral append/replay
 contract, but DCR-0017 released it only as source to vendor.
 
-Roadmap PR10 needs a reviewed consumer to prove one registered repository task
-with objective evidence, bounded continuation, cumulative resource accounting,
-and exact worker adoption. It must not import Fleet target management,
+A managed consumer needs to prove a registered repository task with objective
+evidence, bounded continuation, cumulative resource accounting, and exact
+worker adoption. It must not import Fleet target management,
 credentials, worktree cleanup, desktop state, or host shell authority.
 
 ## Decision
