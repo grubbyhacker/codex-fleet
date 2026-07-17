@@ -279,6 +279,15 @@ describe("behavioral journal compatibility", () => {
       totalTokens: usage.totalTokens,
       runtimeMs: usage.runtimeMs
     });
+    const budgetDecision = budget.decideCompletion("session-1", 2_000);
+    const verifierResult = {
+      outcome: "satisfied" as const,
+      contractDigest: task.contractDigest,
+      taskEvidenceDigest: task.taskEvidenceDigest,
+      headRevision: "head-1",
+      reasons: [],
+      evidenceRefs: ["evidence-1"]
+    };
     const records = [
       {
         version: SESSION_JOURNAL_VERSION,
@@ -291,9 +300,12 @@ describe("behavioral journal compatibility", () => {
             coordinatorBinding: "coordinator",
             authorityBinding: "authority",
             workerBinding: "worker-1",
-            storageLineageId: "storage-1",
+            storageLineageId: "1".repeat(32),
             fenceEpoch: 1,
-            sessionLineageId: "lineage-1",
+            sessionLineageId: "2".repeat(32),
+            authorityProfile: "general-writer-v1",
+            authorityProfileVersion: "1",
+            policyDigest: "f".repeat(64),
             workspace: { workspaceRef: "workspace-1", uid: 20000, gid: 20000 }
           }
         }
@@ -311,6 +323,7 @@ describe("behavioral journal compatibility", () => {
             idempotencyKey: "model-1",
             targetRef: "registered-input-1",
             turnId: "turn-1",
+            fenceEpoch: 1,
             task,
             budgetEvent: reservation
           }
@@ -336,8 +349,164 @@ describe("behavioral journal compatibility", () => {
             budgetEvent: usageEvent
           }
         }
+      },
+      {
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 4,
+        transactionId: "verify-authorize-1",
+        sessionId: "session-1",
+        event: {
+          kind: "effect_authorized",
+          payload: {
+            effectId: "verifier-1",
+            effectKind: "verifier",
+            idempotencyKey: "verifier-1",
+            targetRef: "repository-state-1",
+            turnId: "turn-1",
+            fenceEpoch: 1,
+            task
+          }
+        }
+      },
+      {
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 5,
+        transactionId: "verify-complete-1",
+        sessionId: "session-1",
+        event: {
+          kind: "effect_completed",
+          payload: {
+            effectId: "verifier-1",
+            resultDigest: "d".repeat(64),
+            resultRef: "verifier-result-1"
+          }
+        }
+      },
+      {
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 6,
+        transactionId: "completion-1",
+        sessionId: "session-1",
+        event: {
+          kind: "completion_decided",
+          payload: { task, verifierResult, budgetDecision, decidedAtMs: 2_000 }
+        }
       }
     ].map((record) => canonicalJournalRecordSchema.parse(record));
+
+    const missingUsage = new CanonicalJournalReducer();
+    missingUsage.apply(records[0]!);
+    missingUsage.apply(records[1]!);
+    expect(() =>
+      missingUsage.apply(
+        canonicalJournalRecordSchema.parse({
+          version: SESSION_JOURNAL_VERSION,
+          cursor: 3,
+          transactionId: "missing-usage",
+          sessionId: "session-1",
+          event: {
+            kind: "effect_completed",
+            payload: { effectId: "attempt-1", resultDigest: "e".repeat(64) }
+          }
+        })
+      )
+    ).toThrow("requires exact atomic usage");
+
+    const fabricatedReservation = structuredClone(records[1]!);
+    if (
+      fabricatedReservation.event.kind !== "effect_authorized" ||
+      fabricatedReservation.event.payload.budgetEvent?.kind !== "budget_reserved"
+    )
+      throw new Error("missing reservation fixture");
+    fabricatedReservation.event.payload.budgetEvent.snapshot.totalTokens = 1;
+    const fabricated = new CanonicalJournalReducer();
+    fabricated.apply(records[0]!);
+    expect(() => fabricated.apply(fabricatedReservation)).toThrow(
+      "conflicts with cumulative budget state"
+    );
+
+    const crossSessionBudget = structuredClone(records[1]!);
+    if (
+      crossSessionBudget.event.kind !== "effect_authorized" ||
+      crossSessionBudget.event.payload.budgetEvent?.kind !== "budget_reserved"
+    )
+      throw new Error("missing reservation fixture");
+    crossSessionBudget.event.payload.budgetEvent.sessionId = "session-2";
+    expect(() => canonicalJournalRecordSchema.parse(crossSessionBudget)).toThrow(
+      "effect budget belongs to another session"
+    );
+
+    const verifierBypass = new CanonicalJournalReducer();
+    records.slice(0, 3).forEach((record) => verifierBypass.apply(record));
+    expect(() =>
+      verifierBypass.apply(
+        canonicalJournalRecordSchema.parse({
+          ...records[5],
+          cursor: 4,
+          transactionId: "verifier-bypass"
+        })
+      )
+    ).toThrow("completed registered verifier effect");
+
+    const fenced = new CanonicalJournalReducer();
+    fenced.apply(records[0]!);
+    fenced.apply(records[1]!);
+    fenced.apply(
+      canonicalJournalRecordSchema.parse({
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 3,
+        transactionId: "adopt-1",
+        sessionId: "session-1",
+        event: {
+          kind: "session_adopted",
+          payload: {
+            kind: "session_reassigned",
+            fingerprint: {
+              logicalSessionId: "session-1",
+              sessionLineage: "2".repeat(32),
+              authorityProfile: "general-writer-v1",
+              authorityProfileVersion: "1",
+              policyDigest: "f".repeat(64),
+              storageLineage: "1".repeat(32),
+              predecessorWorker: "worker-1",
+              predecessorEpoch: 1,
+              successorWorker: "worker-2",
+              successorEpoch: 2,
+              idempotencyKey: "adopt-1"
+            },
+            predecessor: {
+              logicalSessionId: "session-1",
+              sessionLineage: "2".repeat(32),
+              authorityProfile: "general-writer-v1",
+              authorityProfileVersion: "1",
+              policyDigest: "f".repeat(64),
+              storageLineage: "1".repeat(32),
+              workerBinding: "worker-1",
+              fenceEpoch: 1
+            },
+            successor: {
+              logicalSessionId: "session-1",
+              sessionLineage: "2".repeat(32),
+              authorityProfile: "general-writer-v1",
+              authorityProfileVersion: "1",
+              policyDigest: "f".repeat(64),
+              storageLineage: "1".repeat(32),
+              workerBinding: "worker-2",
+              fenceEpoch: 2
+            }
+          }
+        }
+      })
+    );
+    expect(() =>
+      fenced.apply(
+        canonicalJournalRecordSchema.parse({
+          ...records[2],
+          cursor: 4,
+          transactionId: "late-after-adoption"
+        })
+      )
+    ).toThrow("fenced by a newer worker");
 
     const live = new CanonicalJournalReducer();
     records.forEach((record) => live.apply(record));
@@ -349,11 +518,12 @@ describe("behavioral journal compatibility", () => {
       conversation: { backendThreadRef: "thread-1" },
       usage
     });
+    expect(replay.snapshot().sessions["session-1"]?.completionDecisions).toHaveLength(1);
 
     replay.apply(
       canonicalJournalRecordSchema.parse({
         version: SESSION_JOURNAL_VERSION,
-        cursor: 4,
+        cursor: 7,
         transactionId: "terminal-1",
         sessionId: "session-1",
         event: {
@@ -366,7 +536,7 @@ describe("behavioral journal compatibility", () => {
       replay.apply(
         canonicalJournalRecordSchema.parse({
           version: SESSION_JOURNAL_VERSION,
-          cursor: 5,
+          cursor: 8,
           transactionId: "late-complete",
           sessionId: "session-1",
           event: {
@@ -387,7 +557,7 @@ describe("behavioral journal compatibility", () => {
         sessionId: "session-2",
         event: {
           kind: "session_opened",
-          payload: { ...records[0]!.event.payload, sessionLineageId: "lineage-2" }
+          payload: { ...records[0]!.event.payload, sessionLineageId: "3".repeat(32) }
         }
       })
     );
@@ -413,7 +583,7 @@ describe("behavioral journal compatibility", () => {
       transactionId: "transaction-1",
       sessionId: "session-1"
     } as const;
-    expect(() =>
+    expect(
       canonicalJournalRecordSchema.parse({
         ...base,
         event: {
@@ -431,8 +601,8 @@ describe("behavioral journal compatibility", () => {
             }
           }
         }
-      })
-    ).toThrow("requires an atomic usage_recorded budget event");
+      }).event.kind
+    ).toBe("effect_completed");
 
     const reducer = new CanonicalJournalReducer();
     reducer.apply(
@@ -447,6 +617,9 @@ describe("behavioral journal compatibility", () => {
             storageLineageId: "storage-1",
             fenceEpoch: 1,
             sessionLineageId: "lineage-1",
+            authorityProfile: "general-writer-v1",
+            authorityProfileVersion: "1",
+            policyDigest: "f".repeat(64),
             workspace: { workspaceRef: "workspace-1", uid: 1, gid: 1 }
           }
         }

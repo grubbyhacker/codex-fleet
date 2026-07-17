@@ -27,13 +27,18 @@ The journal-v2 vocabulary gains additive, strict records for the missing
 durable facts:
 
 - `session_opened` records immutable session, worker, lineage, and workspace
-  identity. It does not grant provider, repository, or credential authority.
+  identity, including the authority profile version and policy digest needed to
+  validate later fence adoption. It does not grant provider, repository, or
+  credential authority.
 - `session_checkpointed` records an opaque checkpoint reference.
 - `session_terminal` and `turn_terminal` record cancellation or termination so
   replay and late-result rejection do not depend on a transport log.
 - `effect_completed` may carry an opaque result reference, backend conversation
   identity, exact six-dimensional usage, and the matching cumulative
-  `usage_recorded` budget event in one record.
+  `usage_recorded` budget event in one record. New runtime effects also bind a
+  durable turn identity and the worker fence that authorized them. Satisfied
+  decisions bind a durable decision time so the cumulative deadline can be
+  recomputed during replay.
 
 The model-turn authorization remains the source of task, reservation, and
 idempotency authority. Registered task parameters and opaque references remain
@@ -43,6 +48,17 @@ configuration, credentials, URLs, mounts, or shell authority.
 Consumers reconstruct their transport view from canonical records. A consumer
 may name a temporary projection adapter, but it may not persist another
 authoritative event stream.
+
+The 2.1 reader continues to accept strict records emitted by 2.0. A 2.0 effect
+without the new turn/fence/accounting fields is replayed only into explicit
+reconciliation state and cannot support a new satisfied decision. This keeps
+the journal version forward-compatible without treating incomplete historical
+records as new authority.
+
+Model invocation ordinal and verifier-continuation depth are distinct. The one
+fresh invocation after a missing backend thread receives its own reservation at
+the same continuation depth; only a verifier-created continuation advances the
+depth.
 
 ## Compatibility matrix amendment
 

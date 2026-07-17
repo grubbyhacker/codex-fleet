@@ -77,6 +77,20 @@ describe("registered continuation budget accounting", () => {
     });
   });
 
+  it("reserves a missing-thread fresh invocation without inventing a continuation", () => {
+    const account = new ContinuationBudgetAccount(policy, 1_000);
+    account.reserveTurn("session-1", "initial", 0, 1_100);
+    const fresh = account.reserveTurn("session-1", "missing-thread-fresh", 0, 1_200);
+    expect(fresh).toMatchObject({
+      kind: "budget_reserved",
+      reservation: { turnOrdinal: 2, continuationDepth: 0 }
+    });
+    expect(account.reserveTurn("session-1", "continuation", 1, 1_300)).toMatchObject({
+      kind: "budget_exhausted",
+      reason: "model_turn_limit"
+    });
+  });
+
   it("requires escalation when recorded usage overruns a cumulative bound", () => {
     const account = new ContinuationBudgetAccount(policy, 1_000);
     account.reserveTurn("session-1", "initial", 0, 1_100);
@@ -192,7 +206,7 @@ describe("registered continuation budget accounting", () => {
           ...restored,
           reservations: [{ ...restored.reservations[0]!, continuationDepth: 1 }]
         })
-    ).toThrow("restored budget has non-contiguous continuation depth");
+    ).toThrow("restored budget has invalid continuation depth sequence");
   });
 });
 

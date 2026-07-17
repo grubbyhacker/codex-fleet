@@ -180,8 +180,13 @@ export class ContinuationBudgetAccount {
         snapshot: this.snapshotValue
       });
     }
-    if (continuationDepth !== this.snapshotValue.reservations.length)
-      throw new Error("continuation depth must match turn ordinal");
+    const priorDepth = this.snapshotValue.reservations.at(-1)?.continuationDepth ?? 0;
+    if (
+      (this.snapshotValue.reservations.length === 0 && continuationDepth !== 0) ||
+      continuationDepth < priorDepth ||
+      continuationDepth > priorDepth + 1
+    )
+      throw new Error("continuation depth must preserve invocation lineage");
     const exhausted = this.exhaustionReason(continuationDepth, nowMs);
     if (exhausted)
       return budgetAccountingEventSchema.parse({
@@ -302,8 +307,13 @@ function validateRestoredBudgetState(snapshot: ContinuationBudgetSnapshot): void
     reservationIds.add(reservation.idempotencyKey);
     if (reservation.turnOrdinal !== index + 1)
       throw new Error("restored budget has non-contiguous turn ordinals");
-    if (reservation.continuationDepth !== index)
-      throw new Error("restored budget has non-contiguous continuation depth");
+    const priorDepth = index === 0 ? 0 : snapshot.reservations[index - 1]!.continuationDepth;
+    if (
+      (index === 0 && reservation.continuationDepth !== 0) ||
+      reservation.continuationDepth < priorDepth ||
+      reservation.continuationDepth > priorDepth + 1
+    )
+      throw new Error("restored budget has invalid continuation depth sequence");
     if (reservation.continuationDepth > snapshot.policy.maxContinuations)
       throw new Error("restored budget exceeds compiled continuation limit");
     if (
