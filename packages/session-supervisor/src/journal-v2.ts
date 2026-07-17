@@ -178,7 +178,9 @@ const effectCompletionSchema = z
     const accounted = completion.budgetEvent.usage;
     if (
       accounted.inputTokens !== completion.usage.inputTokens ||
+      accounted.cachedInputTokens !== completion.usage.cachedInputTokens ||
       accounted.outputTokens !== completion.usage.outputTokens ||
+      accounted.reasoningOutputTokens !== completion.usage.reasoningOutputTokens ||
       accounted.totalTokens !== completion.usage.totalTokens ||
       accounted.runtimeMs !== completion.usage.runtimeMs
     )
@@ -190,6 +192,7 @@ const effectCompletionSchema = z
 
 const completionDecisionSchema = z
   .object({
+    turnId: id.optional(),
     task: registeredTaskSnapshotSchema,
     verifierResult: registeredVerifierResultSchema,
     budgetDecision: budgetAccountingEventSchema,
@@ -533,27 +536,43 @@ export class CanonicalJournalReducer {
         assertInitialized(next);
         assertNonterminal(next);
         {
+          const compatibleAuthorization = next.authorizedEffects.find((effect) =>
+            sameTask(effect.task, event.payload.task)
+          );
           const modelAuthorization = next.authorizedEffects.find(
             (effect) =>
               effect.effectKind === "model_turn" &&
               effect.turnId &&
               sameTask(effect.task, event.payload.task)
           );
+          if (!modelAuthorization && compatibleAuthorization) {
+            next.reconciliations.push({
+              scopeRef: event.payload.task.taskEvidenceDigest,
+              reason: "legacy_canonical_completion_requires_reconciliation"
+            });
+            break;
+          }
           if (!modelAuthorization)
             throw new Error("completion decision lacks matching registered task authorization");
+          if (!event.payload.turnId || event.payload.turnId !== modelAuthorization.turnId)
+            throw new Error("completion decision conflicts with its model turn");
           const verifierAuthorization = next.authorizedEffects.find(
             (effect) =>
               effect.effectKind === "verifier" &&
               effect.turnId === modelAuthorization.turnId &&
               sameTask(effect.task, event.payload.task)
           );
-          if (
-            !verifierAuthorization ||
-            !next.completedEffects.some(
-              (effect) => effect.effectId === verifierAuthorization.effectId
-            )
-          )
+          const verifierCompletion = verifierAuthorization
+            ? next.completedEffects.find(
+                (effect) => effect.effectId === verifierAuthorization.effectId
+              )
+            : undefined;
+          if (!verifierAuthorization || !verifierCompletion)
             throw new Error("completion decision lacks a completed registered verifier effect");
+          if (
+            verifierCompletion.resultDigest !== canonicalValueDigest(event.payload.verifierResult)
+          )
+            throw new Error("completion decision conflicts with verifier result digest");
           if (
             event.payload.verifierResult.contractDigest !== event.payload.task.contractDigest ||
             event.payload.verifierResult.taskEvidenceDigest !==
@@ -575,7 +594,11 @@ export class CanonicalJournalReducer {
           )
         )
           throw new Error("canonical continuation identity is already linked");
-        validateAndStoreContinuationReservation(next, record.sessionId, event.payload);
+        if (!validateAndStoreContinuationReservation(next, record.sessionId, event.payload))
+          next.reconciliations.push({
+            scopeRef: event.payload.continuationTurnId,
+            reason: "legacy_canonical_continuation_requires_reconciliation"
+          });
         next.continuations.push(event.payload);
         break;
       case "session_adopted":
@@ -690,7 +713,9 @@ function validateAndStoreUsage(
   const account = new ContinuationBudgetAccount(task.budget, restored.startedAtMs, restored);
   const expected = account.recordUsage(sessionId, authorization.effectId, {
     inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
     outputTokens: usage.outputTokens,
+    reasoningOutputTokens: usage.reasoningOutputTokens,
     totalTokens: usage.totalTokens,
     runtimeMs: usage.runtimeMs
   });
@@ -729,7 +754,7 @@ function validateAndStoreContinuationReservation(
   snapshot: CanonicalSessionSnapshot,
   sessionId: string,
   continuation: ContinuationLink
-): void {
+): boolean {
   const authorization = snapshot.authorizedEffects.find(
     (effect) =>
       effect.task?.contractDigest === continuation.input.contractDigest &&
@@ -737,16 +762,43 @@ function validateAndStoreContinuationReservation(
   );
   if (!authorization?.task)
     throw new Error("continuation lacks a matching registered task authorization");
+  const task = authorization.task;
   const event = continuation.reservation;
   if (event.kind !== "budget_reserved") throw new Error("continuation lacks a durable reservation");
   const key = taskBudgetKey(authorization.task);
   const restored = snapshot.budgetSnapshots[key];
-  if (!restored) throw new Error("continuation lacks cumulative budget state");
-  const account = new ContinuationBudgetAccount(
-    authorization.task.budget,
-    restored.startedAtMs,
-    restored
+  if (!authorization.turnId || !authorization.fenceEpoch || !restored) return false;
+  if (
+    continuation.input.parentTurnId !== continuation.sourceTurnId ||
+    continuation.input.continuationDepth !== event.reservation.continuationDepth
+  )
+    throw new Error("continuation lineage conflicts with its reservation");
+  if (
+    continuation.input.taskKind !== authorization.task.taskKind ||
+    continuation.input.completionContract !== authorization.task.completionContract
+  )
+    throw new Error("continuation input conflicts with its registered task");
+  const verifierAuthorization = snapshot.authorizedEffects.find(
+    (effect) =>
+      effect.effectKind === "verifier" &&
+      effect.turnId === continuation.sourceTurnId &&
+      sameTask(effect.task, task)
   );
+  const decision = snapshot.completionDecisions.find(
+    (candidate) =>
+      candidate.turnId === continuation.sourceTurnId &&
+      sameTask(candidate.task, task) &&
+      candidate.verifierResult.outcome === "continuation"
+  );
+  if (
+    !verifierAuthorization ||
+    !snapshot.completedEffects.some(
+      (completion) => completion.effectId === verifierAuthorization.effectId
+    ) ||
+    !decision
+  )
+    throw new Error("continuation lacks a completed verifier continuation decision");
+  const account = new ContinuationBudgetAccount(task.budget, restored.startedAtMs, restored);
   const expected = account.reserveTurn(
     sessionId,
     event.reservation.idempotencyKey,
@@ -756,6 +808,7 @@ function validateAndStoreContinuationReservation(
   if (JSON.stringify(expected) !== JSON.stringify(event))
     throw new Error("continuation reservation conflicts with cumulative budget state");
   snapshot.budgetSnapshots[key] = event.snapshot;
+  return true;
 }
 
 function validateAndApplyAdoption(
@@ -1002,7 +1055,7 @@ export function migrateLegacyAgentdV1Journal(
     );
   }
 
-  const sourceOrderedDigest = digestCanonical(
+  const sourceOrderedDigest = canonicalValueDigest(
     source.map(({ row }) => ({ cursor: row.cursor, eventDigest: row.event_digest }))
   );
   const targetOrderedDigest = orderedRecordDigest(records);
@@ -1124,10 +1177,10 @@ function requireTurn(
 }
 
 function orderedRecordDigest(records: readonly CanonicalJournalRecord[]): string {
-  return digestCanonical(records);
+  return canonicalValueDigest(records);
 }
 
-function digestCanonical(value: unknown): string {
+export function canonicalValueDigest(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 

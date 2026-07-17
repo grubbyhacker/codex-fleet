@@ -89,6 +89,14 @@ describe("registered continuation budget accounting", () => {
       kind: "budget_exhausted",
       reason: "model_turn_limit"
     });
+
+    const wider = new ContinuationBudgetAccount({ ...policy, maxModelTurns: 5 }, 1_000);
+    wider.reserveTurn("session-1", "initial", 0, 1_100);
+    wider.reserveTurn("session-1", "missing-thread-fresh", 0, 1_200);
+    expect(wider.reserveTurn("session-1", "second-fresh", 0, 1_300)).toMatchObject({
+      kind: "budget_exhausted",
+      reason: "missing_thread_retry_limit"
+    });
   });
 
   it("requires escalation when recorded usage overruns a cumulative bound", () => {
@@ -161,6 +169,7 @@ describe("registered continuation budget accounting", () => {
               idempotencyKey: "continuation-1",
               turnOrdinal: 2,
               continuationDepth: 1,
+              invocationKind: "continuation",
               reservedAtMs: 1_200
             }
           ],
@@ -256,10 +265,16 @@ describe("atomic session adoption primitive", () => {
       new SessionReassignmentReducer(predecessor).adopt({ ...fingerprint, successorEpoch: 6 })
     ).toThrow("advance exactly one fence epoch");
     const reducer = new SessionReassignmentReducer(predecessor);
-    reducer.adopt(fingerprint);
+    const adopted = reducer.adopt(fingerprint);
     expect(() => reducer.adopt({ ...fingerprint, successorWorker: "worker-c" })).toThrow(
       "conflicting reassignment replay"
     );
+    expect(() =>
+      new SessionReassignmentReducer(predecessor).apply({
+        ...adopted,
+        successor: { ...adopted.successor, fenceEpoch: adopted.successor.fenceEpoch + 1 }
+      })
+    ).toThrow("successor conflicts");
   });
 
   it("accepts the broker identity wire without transforms and rejects prefixed digests", () => {

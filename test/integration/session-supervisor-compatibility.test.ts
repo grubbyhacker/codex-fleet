@@ -9,6 +9,7 @@ import {
   LegacyDeferredVerifierAdapter,
   SESSION_JOURNAL_VERSION,
   canonicalJournalRecordSchema,
+  canonicalValueDigest,
   journalMigrationBundleSchema,
   migrateLegacyAgentdV1Journal
 } from "@grubbyhacker/session-supervisor";
@@ -275,18 +276,30 @@ describe("behavioral journal compatibility", () => {
     };
     const usageEvent = budget.recordUsage("session-1", "attempt-1", {
       inputTokens: usage.inputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
       outputTokens: usage.outputTokens,
+      reasoningOutputTokens: usage.reasoningOutputTokens,
       totalTokens: usage.totalTokens,
       runtimeMs: usage.runtimeMs
     });
     const budgetDecision = budget.decideCompletion("session-1", 2_000);
     const verifierResult = {
-      outcome: "satisfied" as const,
+      outcome: "continuation" as const,
       contractDigest: task.contractDigest,
       taskEvidenceDigest: task.taskEvidenceDigest,
       headRevision: "head-1",
-      reasons: [],
+      reasons: [{ code: "missing_required_state", evidenceRef: "evidence-1" }],
       evidenceRefs: ["evidence-1"]
+    };
+    const continuationReservation = budget.reserveTurn("session-1", "continuation-1", 1, 2_100);
+    const continuationInput = {
+      taskKind: task.taskKind,
+      completionContract: task.completionContract,
+      contractDigest: task.contractDigest,
+      taskEvidenceDigest: task.taskEvidenceDigest,
+      parentTurnId: "turn-1",
+      continuationDepth: 1,
+      reasonCodes: ["missing_required_state"]
     };
     const records = [
       {
@@ -377,7 +390,7 @@ describe("behavioral journal compatibility", () => {
           kind: "effect_completed",
           payload: {
             effectId: "verifier-1",
-            resultDigest: "d".repeat(64),
+            resultDigest: canonicalValueDigest(verifierResult),
             resultRef: "verifier-result-1"
           }
         }
@@ -389,7 +402,22 @@ describe("behavioral journal compatibility", () => {
         sessionId: "session-1",
         event: {
           kind: "completion_decided",
-          payload: { task, verifierResult, budgetDecision, decidedAtMs: 2_000 }
+          payload: { turnId: "turn-1", task, verifierResult, budgetDecision, decidedAtMs: 2_000 }
+        }
+      },
+      {
+        version: SESSION_JOURNAL_VERSION,
+        cursor: 7,
+        transactionId: "continuation-1",
+        sessionId: "session-1",
+        event: {
+          kind: "continuation_linked",
+          payload: {
+            sourceTurnId: "turn-1",
+            continuationTurnId: "turn-2",
+            input: continuationInput,
+            reservation: continuationReservation
+          }
         }
       }
     ].map((record) => canonicalJournalRecordSchema.parse(record));
@@ -447,6 +475,16 @@ describe("behavioral journal compatibility", () => {
         })
       )
     ).toThrow("completed registered verifier effect");
+
+    const invalidContinuation = structuredClone(records[6]!);
+    if (invalidContinuation.event.kind !== "continuation_linked")
+      throw new Error("missing continuation fixture");
+    invalidContinuation.event.payload.input.parentTurnId = "unrelated-turn";
+    const lineage = new CanonicalJournalReducer();
+    records.slice(0, 6).forEach((record) => lineage.apply(record));
+    expect(() => lineage.apply(invalidContinuation)).toThrow(
+      "lineage conflicts with its reservation"
+    );
 
     const fenced = new CanonicalJournalReducer();
     fenced.apply(records[0]!);
@@ -523,7 +561,7 @@ describe("behavioral journal compatibility", () => {
     replay.apply(
       canonicalJournalRecordSchema.parse({
         version: SESSION_JOURNAL_VERSION,
-        cursor: 7,
+        cursor: 8,
         transactionId: "terminal-1",
         sessionId: "session-1",
         event: {
@@ -536,7 +574,7 @@ describe("behavioral journal compatibility", () => {
       replay.apply(
         canonicalJournalRecordSchema.parse({
           version: SESSION_JOURNAL_VERSION,
-          cursor: 8,
+          cursor: 9,
           transactionId: "late-complete",
           sessionId: "session-1",
           event: {
