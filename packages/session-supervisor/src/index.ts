@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export * from "./registered-contracts.js";
+
 export const AGENTD_PROTOCOL_VERSION = "agentd/v1" as const;
 const opaqueRef = z.string().min(1).max(512);
 const id = z.string().min(1).max(128);
@@ -234,7 +236,7 @@ export class SequenceIds implements Ids {
   }
 }
 
-/** Backend-neutral, test-only logical-session supervisor. Runtime/auth/transport authority stays outside this package. */
+/** Backend-neutral logical-session supervisor. Runtime/auth/transport authority stays outside this package. */
 export class SessionSupervisor {
   private sessions = new Map<string, SessionStatus>();
   private turns = new Map<string, TurnStatus>();

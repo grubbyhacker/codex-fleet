@@ -1,5 +1,7 @@
 # DCR-0017: Session supervisor v1 source-vendoring release
 
+Status: Superseded by DCR-0018
+
 ## Decision
 
 The existing session-supervisor spike is released as

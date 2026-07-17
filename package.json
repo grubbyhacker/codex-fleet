@@ -19,6 +19,7 @@
   ],
   "scripts": {
     "build:bin": "bun run scripts/build-bin.ts",
+    "build:session-supervisor": "bun run --cwd packages/session-supervisor build",
     "build": "bun run build:bin",
     "audit:deps": "bun audit",
     "check": "bun run typecheck && bun run lint && bun run format:check && bun run test:all",
@@ -39,6 +40,7 @@
     "test:integration": "bun test test/integration --pass-with-no-tests",
     "test:e2e:codex": "CODEX_FLEET_RUN_CODEX_E2E=1 bun test test/e2e/codex.test.ts --pass-with-no-tests",
     "test:unit": "bun test test/schema --pass-with-no-tests",
+    "verify:session-supervisor-release": "bun run scripts/verify-session-supervisor-release.ts",
     "test:all-raw": "bun test",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:watch": "tsc -p tsconfig.json --noEmit --watch"
