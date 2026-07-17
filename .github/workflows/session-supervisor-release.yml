@@ -51,4 +51,4 @@ jobs:
       - run: bun run --cwd packages/session-supervisor build
       - run: bun publish --cwd packages/session-supervisor --access restricted
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_TOKEN: ${{ secrets.GITHUB_TOKEN }}
