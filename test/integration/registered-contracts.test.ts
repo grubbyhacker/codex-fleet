@@ -44,7 +44,10 @@ describe("registered continuation budget accounting", () => {
       kind: "budget_exhausted",
       reason: "continuation_limit"
     });
-    expect(account.reserveTurn("session-1", "third-turn", 1, 2_100)).toMatchObject({
+    const modelLimited = new ContinuationBudgetAccount({ ...policy, maxContinuations: 3 }, 1_000);
+    modelLimited.reserveTurn("session-1", "model-1", 0, 1_100);
+    modelLimited.reserveTurn("session-1", "model-2", 1, 1_200);
+    expect(modelLimited.reserveTurn("session-1", "model-3", 2, 1_300)).toMatchObject({
       kind: "budget_exhausted",
       reason: "model_turn_limit"
     });
@@ -52,6 +55,7 @@ describe("registered continuation budget accounting", () => {
 
   it("accounts usage exactly once and rejects conflicting replay", () => {
     const account = new ContinuationBudgetAccount(policy, 1_000);
+    account.reserveTurn("session-1", "initial", 0, 1_100);
     const usage = { inputTokens: 60, outputTokens: 40, totalTokens: 100, runtimeMs: 5_000 };
     const first = account.recordUsage("session-1", "attempt-1", usage);
     expect(account.recordUsage("session-1", "attempt-1", usage)).toEqual(first);
@@ -108,6 +112,87 @@ describe("registered continuation budget accounting", () => {
           deadlineAtMs: restored.deadlineAtMs + 1
         })
     ).toThrow("restored budget deadline does not match compiled policy");
+  });
+
+  it("rejects restored aggregate resets and malformed replay identities", () => {
+    const exactPolicy = { ...policy, maxTotalTokens: 10 };
+    const source = new ContinuationBudgetAccount(exactPolicy, 1_000);
+    source.reserveTurn("session-1", "initial", 0, 1_100);
+    source.recordUsage("session-1", "attempt-1", {
+      inputTokens: 6,
+      outputTokens: 4,
+      totalTokens: 10,
+      runtimeMs: 1_000
+    });
+    const restored = source.snapshot();
+
+    expect(
+      () =>
+        new ContinuationBudgetAccount(exactPolicy, 1_000, {
+          ...restored,
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          runtimeMs: 0
+        })
+    ).toThrow("restored budget aggregates do not match usage records");
+    expect(
+      () =>
+        new ContinuationBudgetAccount(exactPolicy, 1_000, {
+          ...restored,
+          reservations: [
+            ...restored.reservations,
+            {
+              ...restored.reservations[0]!,
+              idempotencyKey: "continuation-1",
+              turnOrdinal: 2,
+              continuationDepth: 1,
+              reservedAtMs: 1_200
+            }
+          ],
+          usageRecords: [...restored.usageRecords, restored.usageRecords[0]!],
+          inputTokens: 12,
+          outputTokens: 8,
+          totalTokens: 20,
+          runtimeMs: 2_000
+        })
+    ).toThrow("restored budget has duplicate usage attempt id");
+    expect(
+      () =>
+        new ContinuationBudgetAccount(exactPolicy, 1_000, {
+          ...restored,
+          reservations: [
+            ...restored.reservations,
+            { ...restored.reservations[0]!, turnOrdinal: 3, continuationDepth: 1 }
+          ]
+        })
+    ).toThrow("restored budget has duplicate reservation id");
+    expect(
+      () =>
+        new ContinuationBudgetAccount(exactPolicy, 1_000, {
+          ...restored,
+          reservations: [
+            {
+              ...restored.reservations[0]!,
+              timeoutMs: exactPolicy.perTurnTimeoutMs + 1
+            }
+          ]
+        })
+    ).toThrow("restored budget has invalid reservation timeout");
+    expect(
+      () =>
+        new ContinuationBudgetAccount(exactPolicy, 1_000, {
+          ...restored,
+          reservations: [{ ...restored.reservations[0]!, turnOrdinal: 2 }]
+        })
+    ).toThrow("restored budget has non-contiguous turn ordinals");
+    expect(
+      () =>
+        new ContinuationBudgetAccount(exactPolicy, 1_000, {
+          ...restored,
+          reservations: [{ ...restored.reservations[0]!, continuationDepth: 1 }]
+        })
+    ).toThrow("restored budget has non-contiguous continuation depth");
   });
 });
 

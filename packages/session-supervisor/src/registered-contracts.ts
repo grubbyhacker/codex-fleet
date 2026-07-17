@@ -140,6 +140,7 @@ export class ContinuationBudgetAccount {
         throw new Error("restored budget start does not match requested account");
       if (parsedRestored.deadlineAtMs !== startedAtMs + parsedPolicy.wallClockDeadlineMs)
         throw new Error("restored budget deadline does not match compiled policy");
+      validateRestoredBudgetState(parsedRestored);
       this.snapshotValue = parsedRestored;
     } else {
       this.snapshotValue = continuationBudgetSnapshotSchema.parse({
@@ -179,6 +180,8 @@ export class ContinuationBudgetAccount {
         snapshot: this.snapshotValue
       });
     }
+    if (continuationDepth !== this.snapshotValue.reservations.length)
+      throw new Error("continuation depth must match turn ordinal");
     const exhausted = this.exhaustionReason(continuationDepth, nowMs);
     if (exhausted)
       return budgetAccountingEventSchema.parse({
@@ -223,6 +226,8 @@ export class ContinuationBudgetAccount {
         snapshot: this.snapshotValue
       });
     }
+    if (this.snapshotValue.usageRecords.length >= this.snapshotValue.reservations.length)
+      throw new Error("usage record requires an unaccounted turn reservation");
     this.snapshotValue.usageRecords.push({ attemptId, usage: parsed });
     this.snapshotValue.inputTokens += parsed.inputTokens;
     this.snapshotValue.outputTokens += parsed.outputTokens;
@@ -283,6 +288,63 @@ function sameBudgetPolicy(
     expected.maxRuntimeMs === restored.maxRuntimeMs &&
     expected.perTurnTimeoutMs === restored.perTurnTimeoutMs
   );
+}
+
+function validateRestoredBudgetState(snapshot: ContinuationBudgetSnapshot): void {
+  if (snapshot.reservations.length > snapshot.policy.maxModelTurns)
+    throw new Error("restored budget exceeds compiled model turn limit");
+
+  const reservationIds = new Set<string>();
+  let previousReservedAtMs = snapshot.startedAtMs;
+  for (const [index, reservation] of snapshot.reservations.entries()) {
+    if (reservationIds.has(reservation.idempotencyKey))
+      throw new Error("restored budget has duplicate reservation id");
+    reservationIds.add(reservation.idempotencyKey);
+    if (reservation.turnOrdinal !== index + 1)
+      throw new Error("restored budget has non-contiguous turn ordinals");
+    if (reservation.continuationDepth !== index)
+      throw new Error("restored budget has non-contiguous continuation depth");
+    if (reservation.continuationDepth > snapshot.policy.maxContinuations)
+      throw new Error("restored budget exceeds compiled continuation limit");
+    if (
+      reservation.reservedAtMs < previousReservedAtMs ||
+      reservation.reservedAtMs >= snapshot.deadlineAtMs
+    )
+      throw new Error("restored budget has invalid reservation time");
+    if (
+      reservation.timeoutMs > snapshot.policy.perTurnTimeoutMs ||
+      reservation.timeoutMs > snapshot.policy.maxRuntimeMs ||
+      reservation.timeoutMs > snapshot.deadlineAtMs - reservation.reservedAtMs
+    )
+      throw new Error("restored budget has invalid reservation timeout");
+    previousReservedAtMs = reservation.reservedAtMs;
+  }
+
+  const attemptIds = new Set<string>();
+  if (snapshot.usageRecords.length > snapshot.reservations.length)
+    throw new Error("restored budget has usage without a turn reservation");
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let totalTokens = 0;
+  let runtimeMs = 0;
+  for (const record of snapshot.usageRecords) {
+    if (attemptIds.has(record.attemptId))
+      throw new Error("restored budget has duplicate usage attempt id");
+    attemptIds.add(record.attemptId);
+    inputTokens += record.usage.inputTokens;
+    outputTokens += record.usage.outputTokens;
+    totalTokens += record.usage.totalTokens;
+    runtimeMs += record.usage.runtimeMs;
+  }
+  if (![inputTokens, outputTokens, totalTokens, runtimeMs].every(Number.isSafeInteger))
+    throw new Error("restored budget aggregates exceed safe integer range");
+  if (
+    snapshot.inputTokens !== inputTokens ||
+    snapshot.outputTokens !== outputTokens ||
+    snapshot.totalTokens !== totalTokens ||
+    snapshot.runtimeMs !== runtimeMs
+  )
+    throw new Error("restored budget aggregates do not match usage records");
 }
 
 export const registeredTaskSnapshotSchema = z
