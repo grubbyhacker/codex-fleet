@@ -1,6 +1,7 @@
 # DCR-0017: Session supervisor v1 source-vendoring release
 
-Status: Superseded by DCR-0018
+Status: Superseded by DCR-0018; compiled successors use the
+`@grubbyhacker/session-supervisor` package name
 
 ## Decision
 

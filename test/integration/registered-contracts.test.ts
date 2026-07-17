@@ -6,7 +6,7 @@ import {
   type ContinuationBudgetPolicy,
   type ReassignmentFingerprint,
   type SessionAdoptionBinding
-} from "@codex-fleet/session-supervisor";
+} from "@grubbyhacker/session-supervisor";
 
 const policy: ContinuationBudgetPolicy = {
   maxContinuations: 1,
@@ -16,9 +16,9 @@ const policy: ContinuationBudgetPolicy = {
   maxRuntimeMs: 10_000,
   perTurnTimeoutMs: 8_000
 };
-const sessionLineage = `sha256:${"a".repeat(64)}`;
-const policyDigest = `sha256:${"b".repeat(64)}`;
-const storageLineage = `sha256:${"c".repeat(64)}`;
+const sessionLineage = "a".repeat(32);
+const policyDigest = "b".repeat(64);
+const storageLineage = "c".repeat(32);
 
 describe("registered continuation budget accounting", () => {
   it("reserves before admission, replays idempotently, and exhausts every cumulative bound", () => {
@@ -161,5 +161,27 @@ describe("atomic session adoption primitive", () => {
     expect(() => reducer.adopt({ ...fingerprint, successorWorker: "worker-c" })).toThrow(
       "conflicting reassignment replay"
     );
+  });
+
+  it("accepts the broker identity wire without transforms and rejects prefixed digests", () => {
+    expect(new SessionReassignmentReducer(predecessor).current()).toMatchObject({
+      sessionLineage,
+      storageLineage,
+      policyDigest
+    });
+    expect(
+      () =>
+        new SessionReassignmentReducer({
+          ...predecessor,
+          sessionLineage: `sha256:${"a".repeat(64)}`
+        })
+    ).toThrow();
+    expect(
+      () =>
+        new SessionReassignmentReducer({
+          ...predecessor,
+          policyDigest: `sha256:${policyDigest}`
+        })
+    ).toThrow();
   });
 });

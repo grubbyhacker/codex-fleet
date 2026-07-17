@@ -1,6 +1,7 @@
 # DCR-0016: Session supervisor spike and Linux isolation boundary
 
-Status: Spike adopted and extended by DCR-0018
+Status: Spike adopted and extended by DCR-0018 under the
+`@grubbyhacker/session-supervisor` package name
 
 The extraction spike adds `@codex-fleet/session-supervisor`: a pure, backend-neutral, test-only core with versioned `agentd/v1` commands/events/statuses, append-before-invocation journaling, replay-derived state, and ports for runtime, verifier, IDs, and storage. Live state uses the same append-then-apply reducer as replay: a failed append cannot create an accepted session, turn, checkpoint, cancellation, or termination. It deliberately does not import daemon target/worktree/auth/routing/credential/cleanup authority and does not change Fleet's public API or runtime.
 

@@ -1,4 +1,4 @@
-# `@codex-fleet/session-supervisor`
+# `@grubbyhacker/session-supervisor`
 
 This package is the compiled backend-neutral core for durable logical sessions.
 It supplies strict protocol schemas and pure reducers for append-before-invoke
@@ -31,6 +31,11 @@ requires an exact predecessor binding and a one-step fence increase, returns an
 immutable predecessor/successor event, makes exact generation replay
 idempotent, and rejects stale or conflicting adoption. Broker lease transfer
 and coordinator saga phases remain outside this package.
+
+Adoption uses the broker wire identities directly: session and worker-storage
+lineages are lowercase 32-hex IDs, while the policy digest is the lowercase
+64-hex SHA-256 value without a prefix. The reducer does not add or strip
+`sha256:` or otherwise transform these immutable identities.
 
 ## Release and consumption
 

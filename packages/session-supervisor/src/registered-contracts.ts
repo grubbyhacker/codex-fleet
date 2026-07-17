@@ -6,6 +6,8 @@ const id = z
   .max(128)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/);
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
+const lineageId = z.string().regex(/^[0-9a-f]{32}$/);
+const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/);
 const opaqueRef = z.string().min(1).max(512);
 
 export type JsonValue =
@@ -460,11 +462,11 @@ export class RegisteredTaskRegistry {
 export const sessionAdoptionBindingSchema = z
   .object({
     logicalSessionId: id,
-    sessionLineage: digest,
+    sessionLineage: lineageId,
     authorityProfile: id,
     authorityProfileVersion: id,
-    policyDigest: digest,
-    storageLineage: digest,
+    policyDigest: sha256Hex,
+    storageLineage: lineageId,
     workerBinding: opaqueRef,
     fenceEpoch: z.number().int().nonnegative()
   })
@@ -474,11 +476,11 @@ export type SessionAdoptionBinding = z.infer<typeof sessionAdoptionBindingSchema
 export const reassignmentFingerprintSchema = z
   .object({
     logicalSessionId: id,
-    sessionLineage: digest,
+    sessionLineage: lineageId,
     authorityProfile: id,
     authorityProfileVersion: id,
-    policyDigest: digest,
-    storageLineage: digest,
+    policyDigest: sha256Hex,
+    storageLineage: lineageId,
     predecessorWorker: opaqueRef,
     predecessorEpoch: z.number().int().nonnegative(),
     successorWorker: opaqueRef,

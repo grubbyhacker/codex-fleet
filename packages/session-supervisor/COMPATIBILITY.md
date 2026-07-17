@@ -1,6 +1,6 @@
 # Session Supervisor compatibility policy
 
-`@codex-fleet/session-supervisor` is released as compiled JavaScript and
+`@grubbyhacker/session-supervisor` is released as compiled JavaScript and
 declarations from an immutable annotated Git tag. Consumers must pin one exact
 package version and retain the resolved package integrity in their lockfile;
 they must not import a Fleet branch, workspace path, source copy, or version

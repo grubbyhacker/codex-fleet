@@ -19,7 +19,7 @@ credentials, worktree cleanup, desktop state, or host shell authority.
 
 ## Decision
 
-`@codex-fleet/session-supervisor` 1.1 adds neutral, strict primitives alongside
+`@grubbyhacker/session-supervisor` 1.1 adds neutral, strict primitives alongside
 the compatible `agentd/v1` session API:
 
 - a compiled registry maps a task kind to one strict parameter schema,
@@ -35,7 +35,9 @@ the compatible `agentd/v1` session API:
   satisfied verifier result may be accepted;
 - an atomic adoption reducer validates the complete predecessor lineage and
   policy binding, advances exactly one fence epoch, makes exact replay
-  idempotent, and rejects stale or conflicting generations.
+  idempotent, and rejects stale or conflicting generations. It consumes the
+  broker wire without transforms: lowercase 32-hex lineage IDs and a lowercase
+  bare 64-hex policy digest.
 
 The package does not implement broker lease transfer or the coordinator saga.
 It supplies only agentd's atomic adoption primitive; each external saga phase

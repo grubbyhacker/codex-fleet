@@ -6,7 +6,7 @@ import {
   RegisteredTaskRegistry,
   continuationBudgetPolicySchema,
   registeredVerifierResultSchema
-} from "@codex-fleet/session-supervisor";
+} from "@grubbyhacker/session-supervisor";
 
 const budget = continuationBudgetPolicySchema.parse({
   maxContinuations: 1,

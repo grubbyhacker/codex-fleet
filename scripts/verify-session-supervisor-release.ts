@@ -16,7 +16,7 @@ const manifest = JSON.parse(
 ) as PackageManifest;
 const tag = process.env.GITHUB_REF_NAME ?? process.argv[2];
 
-if (manifest.name !== "@codex-fleet/session-supervisor")
+if (manifest.name !== "@grubbyhacker/session-supervisor")
   throw new Error("unexpected session-supervisor package name");
 if (manifest.private) throw new Error("release package must not be private");
 if (JSON.stringify(manifest.files) !== JSON.stringify(["dist", "README.md", "COMPATIBILITY.md"]))
