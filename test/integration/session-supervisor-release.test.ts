@@ -25,5 +25,6 @@ describe("session supervisor release workflow", () => {
 
     expect(workflow).toContain("NPM_CONFIG_TOKEN: ${{ secrets.GITHUB_TOKEN }}");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN:");
+    expect(workflow).toContain("--registry https://npm.pkg.github.com");
   });
 });

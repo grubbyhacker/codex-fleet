@@ -6,10 +6,18 @@ package version and retain the resolved package integrity in their lockfile;
 they must not import a Fleet branch, workspace path, source copy, or version
 range.
 
-The `1.x` line supports exactly `agentd/v1`. Backward-compatible additions may
-ship in a new `1.x` release. Any command, event, replay, persistence, or
-runtime-port change that would make an existing `agentd/v1` journal ambiguous
-requires a new protocol version and a new major package release.
+The `1.x` line is retained only as historical release metadata. The `2.x` line
+uses the strict `session-supervisor/journal/v2` persisted contract and protects
+the behavioral invariants in DCR-0019 rather than preserving the `1.x`
+TypeScript or consumer transport surface. Any journal interpretation that would
+make replay ambiguous requires a new journal version and package major.
+
+Legacy `agentd/v1` journals migrate forward through
+`LegacyAgentdV1JournalReader`. `LegacyDeferredVerifierAdapter` and
+`LegacyTokenUsageAdapter` conservatively reconcile historical verifier and
+usage gaps; they cannot authorize new work or synthesize success. Their
+deletion gates are normative in DCR-0019. Unknown or conflicting source,
+migration, and future journal versions fail closed.
 
 Consumers record the upstream tag, commit SHA, exact package version, and
 lockfile integrity in their own repository. An update must be a reviewed commit

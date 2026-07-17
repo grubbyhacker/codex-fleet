@@ -1,6 +1,6 @@
 # DCR-0018: Registered completion and compiled session supervisor
 
-Status: Accepted
+Status: Accepted; API compatibility policy superseded by DCR-0019
 Date: 2026-07-16
 
 ## Context

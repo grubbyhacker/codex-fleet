@@ -14,7 +14,7 @@ import {
   type SessionJournal,
   type SessionStatus,
   type TurnStatus
-} from "@grubbyhacker/session-supervisor";
+} from "../fixtures/legacy-session-v1.js";
 
 class ControlledAdapter implements RuntimeAdapter {
   readonly inputs: RuntimeInput[] = [];

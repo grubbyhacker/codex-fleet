@@ -5,7 +5,7 @@ import {
   agentdEventSchema,
   createSessionSchema,
   sessionStatusSchema
-} from "@grubbyhacker/session-supervisor";
+} from "../fixtures/legacy-session-v1.js";
 
 describe("agentd session-supervisor protocol schemas", () => {
   it("versions strict commands, events, and statuses without carrying provider credentials", () => {
