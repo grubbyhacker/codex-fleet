@@ -485,6 +485,15 @@ describe("behavioral journal compatibility", () => {
     expect(() => lineage.apply(invalidContinuation)).toThrow(
       "lineage conflicts with its reservation"
     );
+    const invalidReasons = structuredClone(records[6]!);
+    if (invalidReasons.event.kind !== "continuation_linked")
+      throw new Error("missing continuation fixture");
+    invalidReasons.event.payload.input.reasonCodes = ["fabricated_reason"];
+    const reasonBinding = new CanonicalJournalReducer();
+    records.slice(0, 6).forEach((record) => reasonBinding.apply(record));
+    expect(() => reasonBinding.apply(invalidReasons)).toThrow(
+      "reason codes conflict with the verifier decision"
+    );
 
     const continuationUsage = {
       inputTokens: 4,
@@ -774,6 +783,17 @@ describe("behavioral journal compatibility", () => {
     unauthorizedRetry.apply(records[0]!);
     unauthorizedRetry.apply(firstAuthorization);
     expect(() => unauthorizedRetry.apply(freshAuthorization)).toThrow(
+      "lacks a completed missing backend thread predecessor"
+    );
+    const borrowedRetry = structuredClone(freshAuthorization);
+    if (borrowedRetry.event.kind !== "effect_authorized")
+      throw new Error("missing retry authorization fixture");
+    borrowedRetry.event.payload.turnId = "unrelated-turn";
+    const crossTurnRetry = new CanonicalJournalReducer();
+    crossTurnRetry.apply(records[0]!);
+    crossTurnRetry.apply(firstAuthorization);
+    crossTurnRetry.apply(missingThreadCompletion);
+    expect(() => crossTurnRetry.apply({ ...borrowedRetry, cursor: 4 })).toThrow(
       "lacks a completed missing backend thread predecessor"
     );
     const authorizedRetry = new CanonicalJournalReducer();

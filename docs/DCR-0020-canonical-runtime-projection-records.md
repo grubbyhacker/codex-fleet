@@ -42,12 +42,14 @@ durable facts:
 - A completion decision binds the exact model turn and the completed verifier
   digest for that turn. A deterministic continuation may follow either the
   `missing_or_stale` or `continuation` verifier outcome defined by the
-  registered contract; it cannot borrow a decision from another turn with the
-  same task snapshot.
+  registered contract. Its reason codes are the canonical sorted reason codes
+  from that bound verifier result; it cannot substitute prompt bytes or borrow
+  a decision from another turn with the same task snapshot.
 - The one same-depth fresh invocation is authorized only after the predecessor
   completion durably records `missing_backend_thread`. Its reservation carries
   `retryCause: missing_backend_thread`; the budget primitive and journal reducer
-  both reject an uncaused or mismatched same-depth reservation.
+  both reject an uncaused or mismatched same-depth reservation, including a
+  missing-thread fact borrowed from another turn.
 
 The model-turn authorization remains the source of task, reservation, and
 idempotency authority. Registered task parameters and opaque references remain

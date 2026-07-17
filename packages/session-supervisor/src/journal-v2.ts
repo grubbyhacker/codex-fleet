@@ -700,6 +700,7 @@ function validateRetryAuthorization(
     const candidate = snapshot.authorizedEffects[index]!;
     if (
       candidate.effectKind === "model_turn" &&
+      candidate.turnId === authorization.turnId &&
       sameTask(candidate.task, authorization.task!) &&
       candidate.budgetEvent?.kind === "budget_reserved" &&
       candidate.budgetEvent.reservation.continuationDepth ===
@@ -845,6 +846,11 @@ function validateAndStoreContinuationReservation(
     !decision
   )
     throw new Error("continuation lacks a completed verifier continuation decision");
+  const expectedReasonCodes = decision.verifierResult.reasons
+    .map((reason) => reason.code)
+    .sort((left, right) => left.localeCompare(right));
+  if (JSON.stringify(continuation.input.reasonCodes) !== JSON.stringify(expectedReasonCodes))
+    throw new Error("continuation reason codes conflict with the verifier decision");
   const account = new ContinuationBudgetAccount(task.budget, restored.startedAtMs, restored);
   const expected = account.reserveTurn(
     sessionId,
