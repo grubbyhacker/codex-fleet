@@ -32,6 +32,8 @@ describe("tui dashboard", () => {
       expect(output.rendered).toContain("Codex Fleet");
       expect(output.rendered).toContain("orch/tui-session");
       expect(output.rendered).toContain(delegated.taskId);
+      expect(output.rendered).toContain("Model:    gpt-5.6-terra");
+      expect(output.rendered).toContain("Thinking: Codex default");
       expect(output.tasks).toContainEqual(expect.objectContaining({ id: delegated.taskId }));
     } finally {
       await daemon.close().catch(() => undefined);
@@ -111,6 +113,30 @@ describe("tui dashboard", () => {
     expect(rendered).toContain("Stale");
     expect(rendered).toContain("fresh-s");
     expect(rendered).toContain("quiet 15m ago");
+  });
+
+  it("shows the configured worker model and thinking level in task details", () => {
+    const rendered = renderDashboard(
+      {
+        collectedAt: "2026-06-18T18:00:00.000Z",
+        histories: {},
+        tasks: [
+          task({
+            id: "configured-worker-task",
+            state: "running",
+            createdAt: "2026-06-18T17:55:00.000Z",
+            updatedAt: "2026-06-18T17:55:00.000Z",
+            lastActivityAt: "2026-06-18T17:55:00.000Z",
+            workerModel: "gpt-5.6-sol",
+            workerReasoningEffort: "high"
+          })
+        ]
+      },
+      { color: false }
+    );
+
+    expect(rendered).toContain("Model:    gpt-5.6-sol");
+    expect(rendered).toContain("Thinking: high");
   });
 
   it("uses selected task details with a full-width bottom event pane", () => {
@@ -398,6 +424,8 @@ function task(overrides: {
   prompt?: string;
   finalResponse?: string;
   workerStderr?: string;
+  workerModel?: string;
+  workerReasoningEffort?: string;
 }): TaskSnapshot {
   return {
     createdAt: overrides.createdAt,
@@ -416,6 +444,8 @@ function task(overrides: {
     updatedAt: overrides.updatedAt,
     workerStderr: overrides.workerStderr,
     workerStderrPreview: overrides.workerStderr,
+    workerModel: overrides.workerModel,
+    workerReasoningEffort: overrides.workerReasoningEffort,
     worktreePath: overrides.worktreePath
   };
 }
