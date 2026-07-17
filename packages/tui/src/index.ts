@@ -271,6 +271,8 @@ function buildDashboardView(data: DashboardData, options: DashboardOptions): Das
     detailLines.push(`Target:   ${formatTarget(selected)}`);
     detailLines.push(`Session:  ${formatSession(selected)}`);
     detailLines.push(`State:    ${stateBadge(selected, options)}`);
+    detailLines.push(`Model:    ${selected.workerModel ?? "Codex default"}`);
+    detailLines.push(`Thinking: ${selected.workerReasoningEffort ?? "Codex default"}`);
     if (!compactDetailMode) {
       detailLines.push(
         `Started:  ${formatLocalTimestamp(selected.createdAt)} (${formatAge(Date.parse(selected.createdAt), now)} ago)`
