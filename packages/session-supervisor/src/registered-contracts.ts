@@ -463,6 +463,12 @@ export const registeredVerifierResultSchema = z
   });
 export type RegisteredVerifierResult = z.infer<typeof registeredVerifierResultSchema>;
 
+export function canonicalReasonCodes(
+  reasons: readonly z.infer<typeof verifierReasonSchema>[]
+): string[] {
+  return [...new Set(reasons.map((reason) => reason.code))].sort();
+}
+
 export const continuationPromptInputSchema = z
   .object({
     taskKind: id,
@@ -571,7 +577,7 @@ export class RegisteredTaskRegistry {
   ): ContinuationPromptInput {
     if (result.outcome !== "missing_or_stale" && result.outcome !== "continuation")
       throw new Error("verifier outcome cannot continue");
-    const reasonCodes = [...new Set(result.reasons.map((reason) => reason.code))].sort();
+    const reasonCodes = canonicalReasonCodes(result.reasons);
     return continuationPromptInputSchema.parse({
       taskKind: task.taskKind,
       completionContract: task.completionContract,

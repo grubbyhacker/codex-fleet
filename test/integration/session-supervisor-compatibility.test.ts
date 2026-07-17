@@ -288,7 +288,11 @@ describe("behavioral journal compatibility", () => {
       contractDigest: task.contractDigest,
       taskEvidenceDigest: task.taskEvidenceDigest,
       headRevision: "head-1",
-      reasons: [{ code: "missing_required_state", evidenceRef: "evidence-1" }],
+      reasons: [
+        { code: "policy_mismatch", evidenceRef: "evidence-1" },
+        { code: "missing_required_state", evidenceRef: "evidence-1" },
+        { code: "policy_mismatch", evidenceRef: "evidence-1" }
+      ],
       evidenceRefs: ["evidence-1"]
     };
     const continuationReservation = budget.reserveTurn("session-1", "continuation-1", 1, 2_100);
@@ -299,7 +303,7 @@ describe("behavioral journal compatibility", () => {
       taskEvidenceDigest: task.taskEvidenceDigest,
       parentTurnId: "turn-1",
       continuationDepth: 1,
-      reasonCodes: ["missing_required_state"]
+      reasonCodes: ["missing_required_state", "policy_mismatch"]
     };
     const records = [
       {

@@ -12,6 +12,7 @@ import {
   ContinuationBudgetAccount,
   SessionReassignmentReducer,
   budgetAccountingEventSchema,
+  canonicalReasonCodes,
   continuationPromptInputSchema,
   registeredTaskSnapshotSchema,
   registeredVerifierResultSchema,
@@ -846,9 +847,7 @@ function validateAndStoreContinuationReservation(
     !decision
   )
     throw new Error("continuation lacks a completed verifier continuation decision");
-  const expectedReasonCodes = decision.verifierResult.reasons
-    .map((reason) => reason.code)
-    .sort((left, right) => left.localeCompare(right));
+  const expectedReasonCodes = canonicalReasonCodes(decision.verifierResult.reasons);
   if (JSON.stringify(continuation.input.reasonCodes) !== JSON.stringify(expectedReasonCodes))
     throw new Error("continuation reason codes conflict with the verifier decision");
   const account = new ContinuationBudgetAccount(task.budget, restored.startedAtMs, restored);
