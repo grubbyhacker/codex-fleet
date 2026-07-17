@@ -88,6 +88,27 @@ describe("registered continuation budget accounting", () => {
       reason: "token_limit"
     });
   });
+
+  it("rejects restored state that expands or changes the compiled budget", () => {
+    const source = new ContinuationBudgetAccount(policy, 1_000);
+    source.reserveTurn("session-1", "initial", 0, 1_100);
+    const restored = source.snapshot();
+
+    expect(
+      () =>
+        new ContinuationBudgetAccount(policy, 1_000, {
+          ...restored,
+          policy: { ...restored.policy, maxTotalTokens: restored.policy.maxTotalTokens + 1 }
+        })
+    ).toThrow("restored budget policy does not match compiled policy");
+    expect(
+      () =>
+        new ContinuationBudgetAccount(policy, 1_000, {
+          ...restored,
+          deadlineAtMs: restored.deadlineAtMs + 1
+        })
+    ).toThrow("restored budget deadline does not match compiled policy");
+  });
 });
 
 describe("atomic session adoption primitive", () => {

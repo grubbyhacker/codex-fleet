@@ -130,19 +130,28 @@ export class ContinuationBudgetAccount {
     restored?: ContinuationBudgetSnapshot
   ) {
     const parsedPolicy = continuationBudgetPolicySchema.parse(policy);
-    this.snapshotValue = restored
-      ? continuationBudgetSnapshotSchema.parse(restored)
-      : continuationBudgetSnapshotSchema.parse({
-          policy: parsedPolicy,
-          startedAtMs,
-          deadlineAtMs: startedAtMs + parsedPolicy.wallClockDeadlineMs,
-          reservations: [],
-          usageRecords: [],
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-          runtimeMs: 0
-        });
+    if (restored) {
+      const parsedRestored = continuationBudgetSnapshotSchema.parse(restored);
+      if (!sameBudgetPolicy(parsedPolicy, parsedRestored.policy))
+        throw new Error("restored budget policy does not match compiled policy");
+      if (parsedRestored.startedAtMs !== startedAtMs)
+        throw new Error("restored budget start does not match requested account");
+      if (parsedRestored.deadlineAtMs !== startedAtMs + parsedPolicy.wallClockDeadlineMs)
+        throw new Error("restored budget deadline does not match compiled policy");
+      this.snapshotValue = parsedRestored;
+    } else {
+      this.snapshotValue = continuationBudgetSnapshotSchema.parse({
+        policy: parsedPolicy,
+        startedAtMs,
+        deadlineAtMs: startedAtMs + parsedPolicy.wallClockDeadlineMs,
+        reservations: [],
+        usageRecords: [],
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        runtimeMs: 0
+      });
+    }
   }
 
   snapshot(): ContinuationBudgetSnapshot {
@@ -258,6 +267,20 @@ export class ContinuationBudgetAccount {
       return "runtime_limit";
     return undefined;
   }
+}
+
+function sameBudgetPolicy(
+  expected: ContinuationBudgetPolicy,
+  restored: ContinuationBudgetPolicy
+): boolean {
+  return (
+    expected.maxContinuations === restored.maxContinuations &&
+    expected.maxModelTurns === restored.maxModelTurns &&
+    expected.wallClockDeadlineMs === restored.wallClockDeadlineMs &&
+    expected.maxTotalTokens === restored.maxTotalTokens &&
+    expected.maxRuntimeMs === restored.maxRuntimeMs &&
+    expected.perTurnTimeoutMs === restored.perTurnTimeoutMs
+  );
 }
 
 export const registeredTaskSnapshotSchema = z
