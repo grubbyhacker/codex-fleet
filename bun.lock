@@ -57,8 +57,8 @@
       },
     },
     "packages/session-supervisor": {
-      "name": "@codex-fleet/session-supervisor",
-      "version": "0.0.0",
+      "name": "@grubbyhacker/session-supervisor",
+      "version": "1.1.0",
       "dependencies": {
         "zod": "4.4.3",
       },
@@ -90,7 +90,7 @@
 
     "@codex-fleet/mcp-adapter": ["@codex-fleet/mcp-adapter@workspace:packages/mcp-adapter"],
 
-    "@codex-fleet/session-supervisor": ["@codex-fleet/session-supervisor@workspace:packages/session-supervisor"],
+    "@grubbyhacker/session-supervisor": ["@grubbyhacker/session-supervisor@workspace:packages/session-supervisor"],
 
     "@codex-fleet/shared": ["@codex-fleet/shared@workspace:packages/shared"],
 

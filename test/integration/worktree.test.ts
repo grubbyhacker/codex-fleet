@@ -223,7 +223,9 @@ describe("repo registry and worktree isolation", () => {
     const remote = join(root, "remote.git");
     const updater = join(root, "updater");
     initRepo(repo);
-    execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+    execFileSync("git", ["init", "--bare", "--initial-branch=main", remote], {
+      stdio: "ignore"
+    });
     execFileSync("git", ["remote", "add", "origin", remote], { cwd: repo, stdio: "ignore" });
     execFileSync("git", ["push", "-u", "origin", "main"], { cwd: repo, stdio: "ignore" });
     execFileSync("git", ["clone", remote, updater], { stdio: "ignore" });

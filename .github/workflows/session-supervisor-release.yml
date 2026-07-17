@@ -1,0 +1,52 @@
+name: Release session supervisor
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/session-supervisor-release.yml
+      - bun.lock
+      - package.json
+      - packages/session-supervisor/**
+      - scripts/verify-session-supervisor-release.ts
+      - test/integration/registered-contracts.test.ts
+      - test/schema/registered-contracts.test.ts
+  push:
+    tags:
+      - session-supervisor-v*
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run --cwd packages/session-supervisor build
+      - run: bun pm pack --cwd packages/session-supervisor --dry-run
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/session-supervisor-v')
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run verify:session-supervisor-release
+      - run: bun run --cwd packages/session-supervisor build
+      - run: bun publish --cwd packages/session-supervisor --access restricted
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

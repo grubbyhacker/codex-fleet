@@ -14,7 +14,7 @@ import {
   type SessionJournal,
   type SessionStatus,
   type TurnStatus
-} from "@codex-fleet/session-supervisor";
+} from "@grubbyhacker/session-supervisor";
 
 class ControlledAdapter implements RuntimeAdapter {
   readonly inputs: RuntimeInput[] = [];

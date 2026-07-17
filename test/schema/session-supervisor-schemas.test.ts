@@ -5,7 +5,7 @@ import {
   agentdEventSchema,
   createSessionSchema,
   sessionStatusSchema
-} from "@codex-fleet/session-supervisor";
+} from "@grubbyhacker/session-supervisor";
 
 describe("agentd session-supervisor protocol schemas", () => {
   it("versions strict commands, events, and statuses without carrying provider credentials", () => {

@@ -1,13 +1,32 @@
 {
-  "name": "@codex-fleet/session-supervisor",
-  "version": "1.0.1",
-  "private": true,
+  "name": "@grubbyhacker/session-supervisor",
+  "version": "1.1.0",
+  "description": "Backend-neutral durable session, completion, budget, and reassignment contracts.",
+  "license": "MIT",
   "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "COMPATIBILITY.md"
+  ],
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "pack:check": "bun run build && bun pm pack --dry-run"
+  },
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/grubbyhacker/codex-fleet.git",
+    "directory": "packages/session-supervisor"
   },
   "dependencies": {
     "zod": "4.4.3"

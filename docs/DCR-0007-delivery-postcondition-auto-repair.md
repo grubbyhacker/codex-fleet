@@ -1,6 +1,6 @@
 # DCR-0007: Delivery Postcondition Auto-Repair
 
-Status: Accepted
+Status: Accepted; semantic-completion scope clarified by DCR-0018
 Date: 2026-06-29
 
 ## Context
@@ -8,6 +8,13 @@ Date: 2026-06-29
 DCR-0006 introduced Codex `Stop` hooks to nudge workers before they ended with dirty delivery worktrees. Local Fleet incidents and direct experiments showed that hooks can work under `codex exec`, but Fleet's `codex mcp-server` worker path does not reliably execute those lifecycle hooks.
 
 Fleet already owns the authoritative post-run worktree inspection, so delivery-contract enforcement belongs in the daemon rather than in orchestrator retry logic or Codex hook behavior.
+
+This is Fleet delivery hygiene, not product semantic completion. Dirtiness and
+branch-ahead checks can justify a bounded repair turn, but they cannot prove that
+the requested repository change, CI result, deployment, or other task outcome
+is correct. DCR-0018 keeps that distinction explicit while allowing registered,
+objective completion verifiers in the separate backend-neutral supervisor
+package.
 
 ## Decision
 
