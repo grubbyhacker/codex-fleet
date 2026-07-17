@@ -44,7 +44,9 @@ export type ContinuationBudgetPolicy = z.infer<typeof continuationBudgetPolicySc
 export const usageAccountingSchema = z
   .object({
     inputTokens: z.number().int().nonnegative(),
+    cachedInputTokens: z.number().int().nonnegative().default(0),
     outputTokens: z.number().int().nonnegative(),
+    reasoningOutputTokens: z.number().int().nonnegative().default(0),
     totalTokens: z.number().int().nonnegative(),
     runtimeMs: z.number().int().nonnegative()
   })
@@ -60,7 +62,9 @@ const budgetReservationSchema = z
     turnOrdinal: z.number().int().positive(),
     continuationDepth: z.number().int().nonnegative(),
     reservedAtMs: z.number().int().nonnegative(),
-    timeoutMs: z.number().int().positive()
+    timeoutMs: z.number().int().positive(),
+    invocationKind: z.enum(["initial", "missing_thread_fresh", "continuation"]).optional(),
+    retryCause: z.literal("missing_backend_thread").optional()
   })
   .strict();
 const usageRecordSchema = z.object({ attemptId: id, usage: usageAccountingSchema }).strict();
@@ -72,7 +76,9 @@ export const continuationBudgetSnapshotSchema = z
     reservations: z.array(budgetReservationSchema),
     usageRecords: z.array(usageRecordSchema),
     inputTokens: z.number().int().nonnegative(),
+    cachedInputTokens: z.number().int().nonnegative().default(0),
     outputTokens: z.number().int().nonnegative(),
+    reasoningOutputTokens: z.number().int().nonnegative().default(0),
     totalTokens: z.number().int().nonnegative(),
     runtimeMs: z.number().int().nonnegative()
   })
@@ -106,7 +112,8 @@ export const budgetAccountingEventSchema = z.discriminatedUnion("kind", [
         "model_turn_limit",
         "wall_clock_deadline",
         "token_limit",
-        "runtime_limit"
+        "runtime_limit",
+        "missing_thread_retry_limit"
       ]),
       snapshot: continuationBudgetSnapshotSchema
     })
@@ -150,7 +157,9 @@ export class ContinuationBudgetAccount {
         reservations: [],
         usageRecords: [],
         inputTokens: 0,
+        cachedInputTokens: 0,
         outputTokens: 0,
+        reasoningOutputTokens: 0,
         totalTokens: 0,
         runtimeMs: 0
       });
@@ -165,13 +174,14 @@ export class ContinuationBudgetAccount {
     sessionId: string,
     idempotencyKey: string,
     continuationDepth: number,
-    nowMs: number
+    nowMs: number,
+    retryCause?: "missing_backend_thread"
   ): BudgetAccountingEvent {
     const existing = this.snapshotValue.reservations.find(
       (reservation) => reservation.idempotencyKey === idempotencyKey
     );
     if (existing) {
-      if (existing.continuationDepth !== continuationDepth)
+      if (existing.continuationDepth !== continuationDepth || existing.retryCause !== retryCause)
         throw new Error("conflicting budget reservation replay");
       return budgetAccountingEventSchema.parse({
         kind: "budget_reserved",
@@ -180,8 +190,29 @@ export class ContinuationBudgetAccount {
         snapshot: this.snapshotValue
       });
     }
-    if (continuationDepth !== this.snapshotValue.reservations.length)
-      throw new Error("continuation depth must match turn ordinal");
+    const priorDepth = this.snapshotValue.reservations.at(-1)?.continuationDepth ?? 0;
+    if (
+      (this.snapshotValue.reservations.length === 0 && continuationDepth !== 0) ||
+      continuationDepth < priorDepth ||
+      continuationDepth > priorDepth + 1
+    )
+      throw new Error("continuation depth must preserve invocation lineage");
+    const sameDepthCount = this.snapshotValue.reservations.filter(
+      (reservation) => reservation.continuationDepth === continuationDepth
+    ).length;
+    if (sameDepthCount >= 2)
+      return budgetAccountingEventSchema.parse({
+        kind: "budget_exhausted",
+        sessionId,
+        reason: "missing_thread_retry_limit",
+        snapshot: this.snapshotValue
+      });
+    const isSameDepthRetry =
+      this.snapshotValue.reservations.length > 0 && continuationDepth === priorDepth;
+    if (isSameDepthRetry && retryCause !== "missing_backend_thread")
+      throw new Error("same-depth retry requires a missing backend thread fact");
+    if (!isSameDepthRetry && retryCause)
+      throw new Error("missing backend thread fact only authorizes a same-depth retry");
     const exhausted = this.exhaustionReason(continuationDepth, nowMs);
     if (exhausted)
       return budgetAccountingEventSchema.parse({
@@ -199,7 +230,14 @@ export class ContinuationBudgetAccount {
         this.snapshotValue.policy.perTurnTimeoutMs,
         this.snapshotValue.deadlineAtMs - nowMs,
         this.snapshotValue.policy.maxRuntimeMs - this.snapshotValue.runtimeMs
-      )
+      ),
+      invocationKind:
+        this.snapshotValue.reservations.length === 0
+          ? "initial"
+          : continuationDepth === priorDepth
+            ? "missing_thread_fresh"
+            : "continuation",
+      retryCause
     });
     this.snapshotValue.reservations.push(reservation);
     return budgetAccountingEventSchema.parse({
@@ -210,7 +248,11 @@ export class ContinuationBudgetAccount {
     });
   }
 
-  recordUsage(sessionId: string, attemptId: string, usage: UsageAccounting): BudgetAccountingEvent {
+  recordUsage(
+    sessionId: string,
+    attemptId: string,
+    usage: z.input<typeof usageAccountingSchema>
+  ): BudgetAccountingEvent {
     const parsed = usageAccountingSchema.parse(usage);
     const existing = this.snapshotValue.usageRecords.find(
       (record) => record.attemptId === attemptId
@@ -230,7 +272,9 @@ export class ContinuationBudgetAccount {
       throw new Error("usage record requires an unaccounted turn reservation");
     this.snapshotValue.usageRecords.push({ attemptId, usage: parsed });
     this.snapshotValue.inputTokens += parsed.inputTokens;
+    this.snapshotValue.cachedInputTokens += parsed.cachedInputTokens;
     this.snapshotValue.outputTokens += parsed.outputTokens;
+    this.snapshotValue.reasoningOutputTokens += parsed.reasoningOutputTokens;
     this.snapshotValue.totalTokens += parsed.totalTokens;
     this.snapshotValue.runtimeMs += parsed.runtimeMs;
     return budgetAccountingEventSchema.parse({
@@ -295,6 +339,7 @@ function validateRestoredBudgetState(snapshot: ContinuationBudgetSnapshot): void
     throw new Error("restored budget exceeds compiled model turn limit");
 
   const reservationIds = new Set<string>();
+  const reservationsPerDepth = new Map<number, number>();
   let previousReservedAtMs = snapshot.startedAtMs;
   for (const [index, reservation] of snapshot.reservations.entries()) {
     if (reservationIds.has(reservation.idempotencyKey))
@@ -302,10 +347,32 @@ function validateRestoredBudgetState(snapshot: ContinuationBudgetSnapshot): void
     reservationIds.add(reservation.idempotencyKey);
     if (reservation.turnOrdinal !== index + 1)
       throw new Error("restored budget has non-contiguous turn ordinals");
-    if (reservation.continuationDepth !== index)
-      throw new Error("restored budget has non-contiguous continuation depth");
+    const priorDepth = index === 0 ? 0 : snapshot.reservations[index - 1]!.continuationDepth;
+    if (
+      (index === 0 && reservation.continuationDepth !== 0) ||
+      reservation.continuationDepth < priorDepth ||
+      reservation.continuationDepth > priorDepth + 1
+    )
+      throw new Error("restored budget has invalid continuation depth sequence");
     if (reservation.continuationDepth > snapshot.policy.maxContinuations)
       throw new Error("restored budget exceeds compiled continuation limit");
+    const depthCount = (reservationsPerDepth.get(reservation.continuationDepth) ?? 0) + 1;
+    if (depthCount > 2) throw new Error("restored budget exceeds missing-thread retry limit");
+    reservationsPerDepth.set(reservation.continuationDepth, depthCount);
+    const expectedKind =
+      index === 0
+        ? "initial"
+        : reservation.continuationDepth === priorDepth
+          ? "missing_thread_fresh"
+          : "continuation";
+    if (reservation.invocationKind && reservation.invocationKind !== expectedKind)
+      throw new Error("restored budget invocation kind conflicts with lineage");
+    if (
+      (expectedKind === "missing_thread_fresh" &&
+        reservation.retryCause !== "missing_backend_thread") ||
+      (expectedKind !== "missing_thread_fresh" && reservation.retryCause)
+    )
+      throw new Error("restored budget retry cause conflicts with lineage");
     if (
       reservation.reservedAtMs < previousReservedAtMs ||
       reservation.reservedAtMs >= snapshot.deadlineAtMs
@@ -324,7 +391,9 @@ function validateRestoredBudgetState(snapshot: ContinuationBudgetSnapshot): void
   if (snapshot.usageRecords.length > snapshot.reservations.length)
     throw new Error("restored budget has usage without a turn reservation");
   let inputTokens = 0;
+  let cachedInputTokens = 0;
   let outputTokens = 0;
+  let reasoningOutputTokens = 0;
   let totalTokens = 0;
   let runtimeMs = 0;
   for (const record of snapshot.usageRecords) {
@@ -332,15 +401,28 @@ function validateRestoredBudgetState(snapshot: ContinuationBudgetSnapshot): void
       throw new Error("restored budget has duplicate usage attempt id");
     attemptIds.add(record.attemptId);
     inputTokens += record.usage.inputTokens;
+    cachedInputTokens += record.usage.cachedInputTokens;
     outputTokens += record.usage.outputTokens;
+    reasoningOutputTokens += record.usage.reasoningOutputTokens;
     totalTokens += record.usage.totalTokens;
     runtimeMs += record.usage.runtimeMs;
   }
-  if (![inputTokens, outputTokens, totalTokens, runtimeMs].every(Number.isSafeInteger))
+  if (
+    ![
+      inputTokens,
+      cachedInputTokens,
+      outputTokens,
+      reasoningOutputTokens,
+      totalTokens,
+      runtimeMs
+    ].every(Number.isSafeInteger)
+  )
     throw new Error("restored budget aggregates exceed safe integer range");
   if (
     snapshot.inputTokens !== inputTokens ||
+    snapshot.cachedInputTokens !== cachedInputTokens ||
     snapshot.outputTokens !== outputTokens ||
+    snapshot.reasoningOutputTokens !== reasoningOutputTokens ||
     snapshot.totalTokens !== totalTokens ||
     snapshot.runtimeMs !== runtimeMs
   )
@@ -380,6 +462,12 @@ export const registeredVerifierResultSchema = z
       context.addIssue({ code: "custom", message: "non-satisfied outcome requires a reason" });
   });
 export type RegisteredVerifierResult = z.infer<typeof registeredVerifierResultSchema>;
+
+export function canonicalReasonCodes(
+  reasons: readonly z.infer<typeof verifierReasonSchema>[]
+): string[] {
+  return [...new Set(reasons.map((reason) => reason.code))].sort();
+}
 
 export const continuationPromptInputSchema = z
   .object({
@@ -489,7 +577,7 @@ export class RegisteredTaskRegistry {
   ): ContinuationPromptInput {
     if (result.outcome !== "missing_or_stale" && result.outcome !== "continuation")
       throw new Error("verifier outcome cannot continue");
-    const reasonCodes = [...new Set(result.reasons.map((reason) => reason.code))].sort();
+    const reasonCodes = canonicalReasonCodes(result.reasons);
     return continuationPromptInputSchema.parse({
       taskKind: task.taskKind,
       completionContract: task.completionContract,
@@ -624,6 +712,28 @@ export class SessionReassignmentReducer {
     }
     if (JSON.stringify(this.currentValue) !== JSON.stringify(parsed.predecessor))
       throw new Error("non-contiguous reassignment history");
+    const fingerprint = parsed.fingerprint;
+    const predecessor = parsed.predecessor;
+    if (
+      fingerprint.logicalSessionId !== predecessor.logicalSessionId ||
+      fingerprint.sessionLineage !== predecessor.sessionLineage ||
+      fingerprint.authorityProfile !== predecessor.authorityProfile ||
+      fingerprint.authorityProfileVersion !== predecessor.authorityProfileVersion ||
+      fingerprint.policyDigest !== predecessor.policyDigest ||
+      fingerprint.storageLineage !== predecessor.storageLineage ||
+      fingerprint.predecessorWorker !== predecessor.workerBinding ||
+      fingerprint.predecessorEpoch !== predecessor.fenceEpoch
+    )
+      throw new Error("reassignment fingerprint conflicts with predecessor");
+    if (fingerprint.successorEpoch !== fingerprint.predecessorEpoch + 1)
+      throw new Error("reassignment must advance exactly one fence epoch");
+    const expectedSuccessor = sessionAdoptionBindingSchema.parse({
+      ...predecessor,
+      workerBinding: fingerprint.successorWorker,
+      fenceEpoch: fingerprint.successorEpoch
+    });
+    if (JSON.stringify(parsed.successor) !== JSON.stringify(expectedSuccessor))
+      throw new Error("reassignment successor conflicts with fingerprint");
     this.history.set(generationKey, parsed);
     this.currentValue = parsed.successor;
   }

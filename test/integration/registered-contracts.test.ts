@@ -77,6 +77,39 @@ describe("registered continuation budget accounting", () => {
     });
   });
 
+  it("reserves a missing-thread fresh invocation without inventing a continuation", () => {
+    const account = new ContinuationBudgetAccount(policy, 1_000);
+    account.reserveTurn("session-1", "initial", 0, 1_100);
+    expect(() => account.reserveTurn("session-1", "unauthorized-fresh", 0, 1_200)).toThrow(
+      "requires a missing backend thread fact"
+    );
+    const fresh = account.reserveTurn(
+      "session-1",
+      "missing-thread-fresh",
+      0,
+      1_200,
+      "missing_backend_thread"
+    );
+    expect(fresh).toMatchObject({
+      kind: "budget_reserved",
+      reservation: { turnOrdinal: 2, continuationDepth: 0 }
+    });
+    expect(account.reserveTurn("session-1", "continuation", 1, 1_300)).toMatchObject({
+      kind: "budget_exhausted",
+      reason: "model_turn_limit"
+    });
+
+    const wider = new ContinuationBudgetAccount({ ...policy, maxModelTurns: 5 }, 1_000);
+    wider.reserveTurn("session-1", "initial", 0, 1_100);
+    wider.reserveTurn("session-1", "missing-thread-fresh", 0, 1_200, "missing_backend_thread");
+    expect(
+      wider.reserveTurn("session-1", "second-fresh", 0, 1_300, "missing_backend_thread")
+    ).toMatchObject({
+      kind: "budget_exhausted",
+      reason: "missing_thread_retry_limit"
+    });
+  });
+
   it("requires escalation when recorded usage overruns a cumulative bound", () => {
     const account = new ContinuationBudgetAccount(policy, 1_000);
     account.reserveTurn("session-1", "initial", 0, 1_100);
@@ -147,6 +180,7 @@ describe("registered continuation budget accounting", () => {
               idempotencyKey: "continuation-1",
               turnOrdinal: 2,
               continuationDepth: 1,
+              invocationKind: "continuation",
               reservedAtMs: 1_200
             }
           ],
@@ -192,7 +226,7 @@ describe("registered continuation budget accounting", () => {
           ...restored,
           reservations: [{ ...restored.reservations[0]!, continuationDepth: 1 }]
         })
-    ).toThrow("restored budget has non-contiguous continuation depth");
+    ).toThrow("restored budget has invalid continuation depth sequence");
   });
 });
 
@@ -242,10 +276,16 @@ describe("atomic session adoption primitive", () => {
       new SessionReassignmentReducer(predecessor).adopt({ ...fingerprint, successorEpoch: 6 })
     ).toThrow("advance exactly one fence epoch");
     const reducer = new SessionReassignmentReducer(predecessor);
-    reducer.adopt(fingerprint);
+    const adopted = reducer.adopt(fingerprint);
     expect(() => reducer.adopt({ ...fingerprint, successorWorker: "worker-c" })).toThrow(
       "conflicting reassignment replay"
     );
+    expect(() =>
+      new SessionReassignmentReducer(predecessor).apply({
+        ...adopted,
+        successor: { ...adopted.successor, fenceEpoch: adopted.successor.fenceEpoch + 1 }
+      })
+    ).toThrow("successor conflicts");
   });
 
   it("accepts the broker identity wire without transforms and rejects prefixed digests", () => {

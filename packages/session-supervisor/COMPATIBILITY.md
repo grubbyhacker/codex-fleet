@@ -12,6 +12,14 @@ the behavioral invariants in DCR-0019 rather than preserving the `1.x`
 TypeScript or consumer transport surface. Any journal interpretation that would
 make replay ambiguous requires a new journal version and package major.
 
+The additive 2.1 records close the new-runtime projection gaps identified by a
+compiled consumer: session identity and terminal authority are journal facts,
+and exact effect result, conversation, usage, and budget accounting are one
+completion transition. Decisions bind one exact model turn and its completed
+verifier result. A same-depth fresh invocation additionally requires a durable
+`missing_backend_thread` predecessor outcome and matching reservation cause. A
+consumer transport log is not a supported compatibility mechanism.
+
 Legacy `agentd/v1` journals migrate forward through
 `LegacyAgentdV1JournalReader`. `LegacyDeferredVerifierAdapter` and
 `LegacyTokenUsageAdapter` conservatively reconcile historical verifier and
