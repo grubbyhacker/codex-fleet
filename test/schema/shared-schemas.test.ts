@@ -31,11 +31,12 @@ describe("shared schemas", () => {
     ).toThrow();
   });
 
-  it("defaults waits to compatible event wakes with compact snapshots", () => {
+  it("defaults waits to compact monitor snapshots without event payloads", () => {
     const parsed = waitTasksRequestSchema.parse({ taskIds: ["task-1"] });
 
     expect(parsed.wakeOn).toBe("any_event");
     expect(parsed.snapshotDetail).toBe("compact");
+    expect(parsed.eventDetail).toBe("none");
   });
 
   it("requires requested statuses for status-only wake mode", () => {

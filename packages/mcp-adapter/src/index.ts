@@ -53,7 +53,7 @@ export function createAdapterServer(options = loadAdapterOptions()): McpServer {
     options,
     "wait_tasks",
     waitTasksRequestSchema,
-    "Primary monitoring primitive for active workers. For orchestration, prefer 30-45s maxWaitSeconds, wakeOn=requested_status, terminal/stale returnOnStatuses, and snapshotDetail=compact. This coalesces heartbeats and tool telemetry until a requested state or timeout instead of returning on ordinary activity. Carry response.nextEventSeq into the next sinceEventSeq. wakeOn=any_event preserves immediate event-following behavior; wakeOn=material_event ignores task_activity and task_observation wakes. returnOnStatuses alone does not suppress event wakes unless wakeOn=requested_status. Do not substitute shell sleeps."
+    "Primary monitoring primitive for active workers. For orchestration, prefer 30-45s maxWaitSeconds, wakeOn=requested_status, terminal/stale returnOnStatuses, snapshotDetail=compact, and the default eventDetail=none. The default returns only small status projections and advances nextEventSeq without replaying prompt, result, stderr, command, or raw event content. Use get_task only after a terminal or unexpected state; use get_task_history for audit/debugging. Carry response.nextEventSeq into the next sinceEventSeq. eventDetail=summary or full is diagnostic-only. wakeOn=any_event preserves immediate activity following behavior; wakeOn=material_event ignores task_activity and task_observation wakes. returnOnStatuses alone does not suppress event wakes unless wakeOn=requested_status. Do not substitute shell sleeps."
   );
   registerProxyTool(
     server,
