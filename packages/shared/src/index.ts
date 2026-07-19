@@ -177,6 +177,25 @@ export type WaitWakeMode = z.infer<typeof waitWakeModeSchema>;
 export const waitSnapshotDetailSchema = z.enum(["compact", "full"]);
 export type WaitSnapshotDetail = z.infer<typeof waitSnapshotDetailSchema>;
 
+export const waitEventDetailSchema = z.enum(["none", "summary", "full"]);
+export type WaitEventDetail = z.infer<typeof waitEventDetailSchema>;
+
+export const waitTaskSnapshotSchema = z.object({
+  id: z.string().min(1),
+  state: taskStateSchema,
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+  lastActivityAt: z.string().min(1).optional(),
+  exitCode: z.number().int().optional(),
+  actualModel: modelTierSchema.optional(),
+  actualModelRoute: modelRouteSchema.optional(),
+  workerModel: z.string().min(1).optional(),
+  workerReasoningEffort: z.string().min(1).optional(),
+  hasFinalResponse: z.boolean(),
+  hasWorkerStderr: z.boolean()
+});
+export type WaitTaskSnapshot = z.infer<typeof waitTaskSnapshotSchema>;
+
 export const waitTasksRequestSchema = z
   .object({
     taskIds: z.array(z.string().min(1)).min(1),
@@ -184,7 +203,8 @@ export const waitTasksRequestSchema = z
     maxWaitSeconds: z.number().int().positive().max(45).optional(),
     returnOnStatuses: z.array(taskStateSchema).min(1).optional(),
     wakeOn: waitWakeModeSchema.default("any_event"),
-    snapshotDetail: waitSnapshotDetailSchema.default("compact")
+    snapshotDetail: waitSnapshotDetailSchema.default("compact"),
+    eventDetail: waitEventDetailSchema.default("none")
   })
   .superRefine((request, context) => {
     if (request.wakeOn === "requested_status" && !request.returnOnStatuses) {
@@ -198,7 +218,7 @@ export const waitTasksRequestSchema = z
 export type WaitTasksRequest = z.infer<typeof waitTasksRequestSchema>;
 
 export const waitTasksResponseSchema = z.object({
-  snapshots: z.array(taskSnapshotSchema),
+  snapshots: z.array(z.union([waitTaskSnapshotSchema, taskSnapshotSchema])),
   events: z.array(eventSchema),
   nextEventSeq: z.number().int().nonnegative(),
   wakeReason: z.enum(["any_event", "material_event", "requested_status", "timeout"]),

@@ -56,7 +56,8 @@ describe("supervision and waiting", () => {
       const waited = (await callDaemon(rpc, "wait_tasks", {
         taskIds: ["task-stale"],
         sinceEventSeq: 1,
-        maxWaitSeconds: 1
+        maxWaitSeconds: 1,
+        eventDetail: "full"
       })) as { events: Array<{ type: string; seq: number }>; snapshots: Array<{ state: string }> };
       expect(waited.events).toContainEqual(expect.objectContaining({ type: "task_state" }));
       expect(waited.snapshots[0]?.state).toBe("stale");
@@ -216,7 +217,8 @@ describe("supervision and waiting", () => {
         taskIds: [delegated.taskId],
         sinceEventSeq: 999,
         maxWaitSeconds: 1,
-        returnOnStatuses: ["exited", "failed_to_start", "cancelled", "timed_out", "stale"]
+        returnOnStatuses: ["exited", "failed_to_start", "cancelled", "timed_out", "stale"],
+        eventDetail: "full"
       })) as {
         events: Array<{ type: string; summary: string; seq: number }>;
         snapshots: Array<{ state: string; lastActivityAt?: string }>;
@@ -281,7 +283,13 @@ describe("supervision and waiting", () => {
       setTimeout(() => emitActivity?.({ kind: "heartbeat", detail: "still-running" }), 50);
 
       const waited = (await wait) as {
-        snapshots: Array<{ prompt?: string; promptPreview?: string; state: string }>;
+        snapshots: Array<{
+          hasFinalResponse: boolean;
+          hasWorkerStderr: boolean;
+          prompt?: string;
+          promptPreview?: string;
+          state: string;
+        }>;
         events: Array<{ seq: number; type: string }>;
         nextEventSeq: number;
         wakeReason: string;
@@ -292,13 +300,13 @@ describe("supervision and waiting", () => {
       expect(waited.wakeReason).toBe("timeout");
       expect(waited.snapshots[0]).toMatchObject({
         state: "running",
-        promptPreview: "retained task prompt"
+        hasFinalResponse: false,
+        hasWorkerStderr: false
       });
       expect(waited.snapshots[0]?.prompt).toBeUndefined();
-      expect(waited.events).toContainEqual(expect.objectContaining({ type: "task_activity" }));
-      expect(waited.nextEventSeq).toBe(
-        Math.max(sinceEventSeq, ...waited.events.map((event) => event.seq))
-      );
+      expect(waited.snapshots[0]?.promptPreview).toBeUndefined();
+      expect(waited.events).toEqual([]);
+      expect(waited.nextEventSeq).toBeGreaterThan(sinceEventSeq);
     } finally {
       releaseWorker?.();
       await daemon.close().catch(() => undefined);
@@ -340,7 +348,8 @@ describe("supervision and waiting", () => {
       const wait = callDaemon(rpc, "wait_tasks", {
         taskIds: [delegated.taskId],
         sinceEventSeq,
-        maxWaitSeconds: 1
+        maxWaitSeconds: 1,
+        eventDetail: "summary"
       });
       setTimeout(() => emitActivity?.({ kind: "heartbeat", detail: "wake-now" }), 50);
 
@@ -353,7 +362,9 @@ describe("supervision and waiting", () => {
       expect(performance.now() - startedAt).toBeLessThan(800);
       expect(waited.wakeReason).toBe("any_event");
       expect(waited.snapshots[0]?.state).toBe("running");
-      expect(waited.events).toContainEqual(expect.objectContaining({ type: "task_activity" }));
+      expect(waited.events).toContainEqual(
+        expect.objectContaining({ type: "task_activity", summary: "activity wake-now" })
+      );
     } finally {
       releaseWorker?.();
       await daemon.close().catch(() => undefined);
@@ -396,7 +407,8 @@ describe("supervision and waiting", () => {
         maxWaitSeconds: 1,
         returnOnStatuses: ["exited"],
         wakeOn: "requested_status",
-        snapshotDetail: "full"
+        snapshotDetail: "full",
+        eventDetail: "full"
       });
       setTimeout(() => releaseWorker?.(), 100);
 
@@ -458,7 +470,8 @@ describe("supervision and waiting", () => {
         taskIds: [delegated.taskId],
         sinceEventSeq,
         maxWaitSeconds: 1,
-        wakeOn: "material_event"
+        wakeOn: "material_event",
+        eventDetail: "full"
       });
       setTimeout(() => emitActivity?.({ kind: "heartbeat", detail: "not-material" }), 30);
       setTimeout(

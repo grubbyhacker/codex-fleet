@@ -1,11 +1,11 @@
-import type { DaemonMethod, ModelRoute, TaskSnapshot } from "@codex-fleet/shared";
+import type { DaemonMethod, ModelRoute, TaskSnapshot, WaitTaskSnapshot } from "@codex-fleet/shared";
 
 export const deployWorkerSmokeMarker = "codex-fleet-deploy-smoke-ok";
 
 type RpcCall = (method: DaemonMethod, params: unknown) => Promise<unknown>;
 
 type WaitTasksResult = {
-  snapshots: TaskSnapshot[];
+  snapshots: WaitTaskSnapshot[];
   nextEventSeq: number;
 };
 
@@ -48,7 +48,7 @@ export async function runDeployWorkerSmoke(options: {
   })) as { taskId: string };
 
   let sinceEventSeq = 1;
-  let terminalTask: TaskSnapshot | undefined;
+  let terminalTask: Pick<TaskSnapshot, "state"> | undefined;
   while (now() < deadline) {
     const remainingSeconds = Math.max(1, Math.ceil((deadline - now()) / 1000));
     const waited = (await options.call("wait_tasks", {
@@ -77,21 +77,21 @@ export async function runDeployWorkerSmoke(options: {
     const detail = (await options.call("get_task", { taskId: delegated.taskId })) as {
       task: TaskSnapshot;
     };
-    terminalTask = detail.task;
-    if (terminalTask.state !== "exited") {
+    const completedTask = detail.task;
+    if (completedTask.state !== "exited") {
       throw new Error(
-        `Deploy worker smoke task ${delegated.taskId} ended in ${terminalTask.state}: ${terminalTask.workerStderr ?? terminalTask.finalResponse ?? "no worker output"}`
+        `Deploy worker smoke task ${delegated.taskId} ended in ${completedTask.state}: ${completedTask.workerStderr ?? completedTask.finalResponse ?? "no worker output"}`
       );
     }
-    const response = terminalTask.finalResponse?.trim() ?? "";
+    const response = completedTask.finalResponse?.trim() ?? "";
     if (response !== deployWorkerSmokeMarker) {
       throw new Error(
         `Deploy worker smoke task ${delegated.taskId} returned ${JSON.stringify(response)} instead of ${JSON.stringify(deployWorkerSmokeMarker)}`
       );
     }
-    if (terminalTask.actualModelRoute !== modelRoute) {
+    if (completedTask.actualModelRoute !== modelRoute) {
       throw new Error(
-        `Deploy worker smoke task ${delegated.taskId} used model route ${terminalTask.actualModelRoute ?? "unknown"} instead of ${modelRoute}`
+        `Deploy worker smoke task ${delegated.taskId} used model route ${completedTask.actualModelRoute ?? "unknown"} instead of ${modelRoute}`
       );
     }
     return {

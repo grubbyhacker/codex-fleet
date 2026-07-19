@@ -21,7 +21,8 @@ import {
   type RpcEnvelope,
   type TaskState,
   type TaskSnapshot,
-  type TargetDescriptor
+  type TargetDescriptor,
+  type WaitTaskSnapshot
 } from "@codex-fleet/shared";
 
 import { CleanupManager } from "./cleanup/cleanup-manager.js";
@@ -545,11 +546,12 @@ export class FleetService {
   ) {
     const waitSeconds = Math.min(request.maxWaitSeconds ?? 5, 45);
     const deadline = Date.now() + waitSeconds * 1000;
+    const initialEventSeq = request.sinceEventSeq ?? this.nextSeq - 1;
 
     while (true) {
       this.refreshStaleTasks();
       const snapshots = request.taskIds.map((taskId) => this.requireTask(clientId, taskId, client));
-      let events = this.state.eventsSince(request.sinceEventSeq, request.taskIds);
+      let events = this.state.eventsSince(initialEventSeq, request.taskIds);
       const statusMatched = matchesReturnStatus(snapshots, request.returnOnStatuses);
       const eventMatched = events.some((event) => eventMatchesWakeMode(event, request.wakeOn));
       const timedOut = Date.now() >= deadline;
@@ -564,10 +566,10 @@ export class FleetService {
           snapshots: snapshots.map((task) =>
             request.snapshotDetail === "full" ? task : compactWaitTaskSnapshot(task)
           ),
-          events,
+          events: waitEvents(events, request.eventDetail),
           nextEventSeq: events.reduce(
             (latest, event) => Math.max(latest, event.seq),
-            request.sinceEventSeq ?? 0
+            initialEventSeq
           ),
           wakeReason: statusMatched
             ? "requested_status"
@@ -691,12 +693,74 @@ function compactTaskSnapshot(task: TaskSnapshot): TaskSnapshot {
   return compact;
 }
 
-function compactWaitTaskSnapshot(task: TaskSnapshot): TaskSnapshot {
-  const { finalResponse, prompt, workerStderr, ...compact } = task;
-  void finalResponse;
-  void prompt;
-  void workerStderr;
-  return compact;
+function compactWaitTaskSnapshot(task: TaskSnapshot): WaitTaskSnapshot {
+  return {
+    id: task.id,
+    state: task.state,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    lastActivityAt: task.lastActivityAt,
+    exitCode: task.exitCode,
+    actualModel: task.actualModel,
+    actualModelRoute: task.actualModelRoute,
+    workerModel: task.workerModel,
+    workerReasoningEffort: task.workerReasoningEffort,
+    hasFinalResponse: Boolean(task.finalResponse ?? task.finalResponsePreview),
+    hasWorkerStderr: Boolean(task.workerStderr ?? task.workerStderrPreview)
+  };
+}
+
+function waitEvents(
+  events: Event[],
+  detail: ReturnType<typeof waitTasksRequestSchema.parse>["eventDetail"]
+): Event[] {
+  if (detail === "none") {
+    return [];
+  }
+  if (detail === "full") {
+    return events;
+  }
+  return events.map(compactWaitEvent);
+}
+
+function compactWaitEvent(event: Event): Event {
+  const payload = parseWaitEventPayload(event);
+  return { ...event, summary: compactWaitEventSummary(event.type, payload) };
+}
+
+function parseWaitEventPayload(event: Event): unknown {
+  try {
+    return JSON.parse(event.summary) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function compactWaitEventSummary(type: string, payload: unknown): string {
+  const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+  if (type === "task_state") {
+    return `state ${String(record.state ?? "updated")}${record.exitCode === undefined ? "" : ` (exit ${record.exitCode})`}`;
+  }
+  if (type === "task_activity") {
+    const telemetry =
+      record.telemetry && typeof record.telemetry === "object"
+        ? (record.telemetry as Record<string, unknown>)
+        : {};
+    const name = telemetry.toolName ?? record.detail ?? record.kind ?? "activity";
+    const duration = telemetry.durationMs === undefined ? "" : ` (${telemetry.durationMs}ms)`;
+    const exit = telemetry.exitCode === undefined ? "" : ` (exit ${telemetry.exitCode})`;
+    return `activity ${String(name)}${duration}${exit}`;
+  }
+  if (type === "task_observation") {
+    return "worker remains active";
+  }
+  if (type === "worktree_status") {
+    return `worktree ${Number(record.dirtyFiles ?? 0)} dirty file(s)`;
+  }
+  if (type === "environment_friction") {
+    return `environment friction: ${String(record.kind ?? "reported")}`;
+  }
+  return type.replaceAll("_", " ");
 }
 
 function eventMatchesWakeMode(
