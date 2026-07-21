@@ -185,6 +185,21 @@ function completionBudgetDecision() {
   return account.decideCompletion("session-1", 1_500);
 }
 
+function continuationBudgetReservation() {
+  const account = new ContinuationBudgetAccount(policy, 1_000);
+  account.reserveTurn("session-1", "model-1", 0, 1_001);
+  account.recordUsage("session-1", "model-effect", {
+    inputTokens: 1,
+    cachedInputTokens: 0,
+    outputTokens: 1,
+    reasoningOutputTokens: 0,
+    totalTokens: 2,
+    runtimeMs: 1
+  });
+  account.decideCompletion("session-1", 1_500);
+  return account.reserveTurn("session-1", "continuation-1", 1, 1_501);
+}
+
 describe("canonical waiting observations", () => {
   test("is nonterminal, replay-idempotent, and permits only ordered token-free observations", () => {
     const reducer = new CanonicalJournalReducer();
@@ -238,7 +253,7 @@ describe("canonical waiting observations", () => {
       })
     ).toThrow("conflicting waiting observation replay");
     expect(() =>
-      canonicalJournalRecordSchema.parse({
+      reducer.apply({
         version: SESSION_JOURNAL_VERSION,
         cursor,
         transactionId: "stale-fence",
@@ -256,7 +271,7 @@ describe("canonical waiting observations", () => {
           }
         }
       })
-    ).not.toThrow();
+    ).toThrow("waiting observation is fenced by a newer worker");
     expect(() =>
       canonicalJournalRecordSchema.parse({
         version: SESSION_JOURNAL_VERSION,
@@ -277,6 +292,48 @@ describe("canonical waiting observations", () => {
         }
       })
     ).toThrow("nonterminal observation requires the waiting verifier outcome");
+  });
+
+  test("blocks a depth-one model reservation while completion is unresolved", () => {
+    const reducer = new CanonicalJournalReducer();
+    let cursor = open(reducer);
+    cursor = modelTurn(reducer, cursor);
+    cursor = observation(reducer, cursor, "verifier-1");
+    cursor = waiting(reducer, cursor);
+    const budgetBefore = reducer.snapshot().sessions["session-1"]?.budgetSnapshots;
+    const account = new ContinuationBudgetAccount(policy, 1_000);
+    account.reserveTurn("session-1", "model-1", 0, 1_001);
+    account.recordUsage("session-1", "model-effect", {
+      inputTokens: 1,
+      cachedInputTokens: 0,
+      outputTokens: 1,
+      reasoningOutputTokens: 0,
+      totalTokens: 2,
+      runtimeMs: 1
+    });
+    expect(() =>
+      reducer.apply({
+        version: SESSION_JOURNAL_VERSION,
+        cursor,
+        transactionId: "unauthorized-depth-one-model",
+        sessionId: "session-1",
+        event: {
+          kind: "effect_authorized",
+          payload: {
+            effectId: "model-effect-2",
+            effectKind: "model_turn",
+            idempotencyKey: "model-2",
+            targetRef: "model",
+            turnId: "turn-2",
+            parentTurnId: "turn-1",
+            fenceEpoch: 1,
+            task,
+            budgetEvent: account.reserveTurn("session-1", "model-2", 1, 1_500)
+          }
+        }
+      })
+    ).toThrow("unresolved waiting observation blocks model turn authorization");
+    expect(reducer.snapshot().sessions["session-1"]?.budgetSnapshots).toEqual(budgetBefore);
   });
 
   test("allows one terminal result after waiting, then refuses further observation effects", () => {
@@ -337,5 +394,61 @@ describe("canonical waiting observations", () => {
       }
     });
     expect(reducer.snapshot().sessions["session-1"]?.continuations).toHaveLength(0);
+  });
+
+  test("refuses an old-turn observation after a completion continuation transition", () => {
+    const reducer = new CanonicalJournalReducer();
+    let cursor = open(reducer);
+    cursor = modelTurn(reducer, cursor);
+    cursor = observation(reducer, cursor, "verifier-1");
+    cursor = waiting(reducer, cursor);
+    const continued = {
+      ...waitingResult,
+      outcome: "continuation" as const,
+      reasons: [{ code: "required_check_pending", evidenceRef: "observation-2" }]
+    };
+    cursor = observation(reducer, cursor, "verifier-2", continued);
+    reducer.apply({
+      version: SESSION_JOURNAL_VERSION,
+      cursor,
+      transactionId: "continued",
+      sessionId: "session-1",
+      event: {
+        kind: "completion_decided",
+        payload: {
+          turnId: "turn-1",
+          task,
+          verifierResult: continued,
+          budgetDecision: completionBudgetDecision(),
+          decidedAtMs: 1_500
+        }
+      }
+    });
+    reducer.apply({
+      version: SESSION_JOURNAL_VERSION,
+      cursor: cursor + 1,
+      transactionId: "continuation-linked",
+      sessionId: "session-1",
+      event: {
+        kind: "continuation_linked",
+        payload: {
+          sourceTurnId: "turn-1",
+          continuationTurnId: "turn-2",
+          input: {
+            taskKind: task.taskKind,
+            completionContract: task.completionContract,
+            contractDigest: task.contractDigest,
+            taskEvidenceDigest: task.taskEvidenceDigest,
+            parentTurnId: "turn-1",
+            continuationDepth: 1,
+            reasonCodes: ["required_check_pending"]
+          },
+          reservation: continuationBudgetReservation()
+        }
+      }
+    });
+    expect(() => observation(reducer, cursor + 2, "verifier-3")).toThrow(
+      "canonical completion is already terminal"
+    );
   });
 });

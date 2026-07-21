@@ -514,6 +514,7 @@ export class CanonicalJournalReducer {
           )
             throw new Error("canonical runtime effect requires a registered task");
           if (event.payload.effectKind === "model_turn") {
+            assertNoUnresolvedWaitingObservation(next);
             if (event.payload.budgetEvent?.kind !== "budget_reserved")
               throw new Error("canonical model turn requires a durable reservation");
             if (
@@ -602,6 +603,7 @@ export class CanonicalJournalReducer {
           }
           if (!modelAuthorization)
             throw new Error("completion decision lacks matching registered task authorization");
+          assertCompletionDecisionResolvesWaiting(next, event.payload);
           if (!event.payload.turnId || event.payload.turnId !== modelAuthorization.turnId)
             throw new Error("completion decision conflicts with its model turn");
           const verifierAuthorization = [...next.authorizedEffects]
@@ -757,6 +759,36 @@ function hasTerminalDecisionFor(
   return snapshot.completionDecisions.some(
     (decision) => decision.turnId === turnId && sameRegisteredTask(decision.task, task)
   );
+}
+
+function isWaitingObservationUnresolved(
+  snapshot: CanonicalSessionSnapshot,
+  waiting: WaitingObservation
+): boolean {
+  return !hasTerminalDecisionFor(snapshot, waiting.turnId, waiting.task);
+}
+
+function assertNoUnresolvedWaitingObservation(snapshot: CanonicalSessionSnapshot): void {
+  if (
+    snapshot.waitingObservations.some((waiting) =>
+      isWaitingObservationUnresolved(snapshot, waiting)
+    )
+  )
+    throw new Error("unresolved waiting observation blocks model turn authorization");
+}
+
+function assertCompletionDecisionResolvesWaiting(
+  snapshot: CanonicalSessionSnapshot,
+  decision: CompletionDecision
+): void {
+  if (
+    snapshot.waitingObservations.some(
+      (waiting) =>
+        isWaitingObservationUnresolved(snapshot, waiting) &&
+        (waiting.turnId !== decision.turnId || !sameRegisteredTask(waiting.task, decision.task))
+    )
+  )
+    throw new Error("unresolved waiting observation blocks another completion decision");
 }
 
 function validateVerifierObservationAuthorization(
