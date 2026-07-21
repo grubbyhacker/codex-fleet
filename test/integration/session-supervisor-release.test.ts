@@ -27,4 +27,13 @@ describe("session supervisor release workflow", () => {
     expect(workflow).not.toContain("NODE_AUTH_TOKEN:");
     expect(workflow).toContain("--registry https://npm.pkg.github.com");
   });
+
+  test("supports local release verification without creating a tag", () => {
+    const script = readFileSync(
+      join(import.meta.dir, "../../scripts/verify-session-supervisor-release.ts"),
+      "utf8"
+    );
+
+    expect(script).toContain('SESSION_SUPERVISOR_RELEASE_DRY_RUN === "1"');
+  });
 });

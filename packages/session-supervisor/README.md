@@ -18,6 +18,17 @@ authorization, completion, reconciliation, registered completion,
 continuation, adoption, and two-phase janitorial transitions. Unknown versions
 and event kinds fail closed.
 
+Version 2.2.0 adds `completion_waiting`: a canonical, nonterminal registered
+verifier observation bound to the active task, model turn, verifier effect,
+session fence, typed observation digest, and fixed poll deadline. Waiting never
+reserves or invokes a model turn, changes continuation depth, creates a
+continuation input, satisfies a task, or authorizes cleanup. Only an identical
+observation-effect replay is idempotent. After waiting, the same active
+task/turn/fence may receive another token-free verifier observation or one
+terminal decision; stale, conflicting, superseded, and post-terminal records
+refuse. Deadline exhaustion is an `escalated` terminal decision without a
+continuation.
+
 New-session identity, checkpoint and terminal authority are canonical records,
 not consumer transport events. Effect completion atomically binds the opaque
 result reference, backend conversation identity, exact token/runtime usage,

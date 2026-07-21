@@ -15,6 +15,7 @@ const manifest = JSON.parse(
   readFileSync(join(root, "packages/session-supervisor/package.json"), "utf8")
 ) as PackageManifest;
 const tag = process.env.GITHUB_REF_NAME ?? process.argv[2];
+const dryRun = process.env.SESSION_SUPERVISOR_RELEASE_DRY_RUN === "1";
 
 if (manifest.name !== "@grubbyhacker/session-supervisor")
   throw new Error("unexpected session-supervisor package name");
@@ -25,25 +26,27 @@ if (!tag) throw new Error("pass the immutable release tag or set GITHUB_REF_NAME
 
 const expectedTag = `session-supervisor-v${manifest.version}`;
 if (tag !== expectedTag) throw new Error(`release tag ${tag} does not match ${expectedTag}`);
-if (git(["cat-file", "-t", tag]) !== "tag")
+if (!dryRun && git(["cat-file", "-t", tag]) !== "tag")
   throw new Error("session-supervisor release tag must be annotated");
 
-const releaseCommit = git(["rev-parse", `${tag}^{commit}`]);
+const releaseCommit = dryRun ? git(["rev-parse", "HEAD"]) : git(["rev-parse", `${tag}^{commit}`]);
 const workflowCommit = process.env.GITHUB_SHA;
-if (workflowCommit && releaseCommit !== workflowCommit)
+if (!dryRun && workflowCommit && releaseCommit !== workflowCommit)
   throw new Error("release workflow commit does not match the annotated tag target");
 
-try {
-  execFileSync("git", ["merge-base", "--is-ancestor", releaseCommit, "origin/main"], {
-    cwd: root,
-    stdio: "ignore"
-  });
-} catch {
-  throw new Error("release tag target must be reachable from reviewed origin/main");
+if (!dryRun) {
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", releaseCommit, "origin/main"], {
+      cwd: root,
+      stdio: "ignore"
+    });
+  } catch {
+    throw new Error("release tag target must be reachable from reviewed origin/main");
+  }
 }
 
 process.stdout.write(
-  `${JSON.stringify({ package: manifest.name, version: manifest.version, tag, releaseCommit })}\n`
+  `${JSON.stringify({ package: manifest.name, version: manifest.version, tag, releaseCommit, dryRun })}\n`
 );
 
 function git(args: string[]): string {

@@ -447,7 +447,7 @@ export const verifierReasonSchema = z
   .strict();
 export const registeredVerifierResultSchema = z
   .object({
-    outcome: z.enum(["satisfied", "missing_or_stale", "continuation", "escalated"]),
+    outcome: z.enum(["satisfied", "missing_or_stale", "continuation", "waiting", "escalated"]),
     contractDigest: digest,
     taskEvidenceDigest: digest,
     headRevision: opaqueRef,
