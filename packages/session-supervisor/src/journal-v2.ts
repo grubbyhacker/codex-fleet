@@ -802,24 +802,27 @@ function assertModelTurnAuthorizedAfterWaiting(
     if (
       continuation &&
       snapshot.authorizedEffects.some((effect) =>
-        matchesLinkedContinuationModel(effect, continuation)
+        matchesLinkedContinuationModel(effect, continuation, waiting.task)
       )
     )
       continue;
-    if (!continuation || !matchesLinkedContinuationModel(authorization, continuation))
+    if (!continuation || !matchesLinkedContinuationModel(authorization, continuation, waiting.task))
       throw new Error("waiting continuation requires a matching linked model turn authorization");
   }
 }
 
 function matchesLinkedContinuationModel(
   authorization: EffectAuthorization,
-  continuation: ContinuationLink
+  continuation: ContinuationLink,
+  registeredTask: NonNullable<EffectAuthorization["task"]>
 ): boolean {
   return (
     continuation.continuationTurnId === authorization.turnId &&
     continuation.input.parentTurnId === authorization.parentTurnId &&
     continuation.input.contractDigest === authorization.task?.contractDigest &&
     continuation.input.taskEvidenceDigest === authorization.task?.taskEvidenceDigest &&
+    !!authorization.task &&
+    sameRegisteredTask(authorization.task, registeredTask) &&
     authorization.budgetEvent?.kind === "budget_reserved" &&
     JSON.stringify(authorization.budgetEvent) === JSON.stringify(continuation.reservation)
   );

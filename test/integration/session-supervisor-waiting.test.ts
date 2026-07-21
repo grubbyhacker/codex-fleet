@@ -6,6 +6,7 @@ import {
   SESSION_JOURNAL_VERSION,
   canonicalJournalRecordSchema,
   canonicalValueDigest,
+  type RegisteredTaskSnapshot,
   type RegisteredVerifierResult
 } from "@grubbyhacker/session-supervisor";
 
@@ -206,7 +207,8 @@ function continuationBudgetReservation() {
 function authorizeContinuationModel(
   reducer: CanonicalJournalReducer,
   cursor: number,
-  reservation = continuationBudgetReservation()
+  reservation = continuationBudgetReservation(),
+  registeredTask: RegisteredTaskSnapshot = task
 ): void {
   reducer.apply({
     version: SESSION_JOURNAL_VERSION,
@@ -223,7 +225,7 @@ function authorizeContinuationModel(
         turnId: "turn-2",
         parentTurnId: "turn-1",
         fenceEpoch: 1,
-        task,
+        task: registeredTask,
         budgetEvent: reservation
       }
     }
@@ -511,6 +513,12 @@ describe("canonical waiting observations", () => {
         }
       }
     });
+    expect(() =>
+      authorizeContinuationModel(reducer, cursor + 2, continuationBudgetReservation(), {
+        ...task,
+        parameters: { repository: "mutated-fixture" }
+      })
+    ).toThrow("waiting continuation requires a matching linked model turn authorization");
     authorizeContinuationModel(reducer, cursor + 2);
     expect(
       reducer
