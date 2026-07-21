@@ -20,6 +20,11 @@ verifier result. A same-depth fresh invocation additionally requires a durable
 `missing_backend_thread` predecessor outcome and matching reservation cause. A
 consumer transport log is not a supported compatibility mechanism.
 
+The additive 2.2 `completion_waiting` record is a journal-v2 extension, not a
+journal migration: every valid 2.1 journal replays unchanged. A 2.1 consumer
+does not recognize the new event kind and must fail closed after a waiting
+record; no downgrade adapter is provided or authorized.
+
 Legacy `agentd/v1` journals migrate forward through
 `LegacyAgentdV1JournalReader`. `LegacyDeferredVerifierAdapter` and
 `LegacyTokenUsageAdapter` conservatively reconcile historical verifier and

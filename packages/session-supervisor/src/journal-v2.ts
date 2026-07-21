@@ -212,10 +212,34 @@ const completionDecisionSchema = z
   })
   .strict()
   .superRefine((decision, context) => {
+    if (decision.verifierResult.outcome === "waiting")
+      context.addIssue({
+        code: "custom",
+        message: "waiting must be recorded as a nonterminal observation"
+      });
     if (decision.budgetDecision.kind !== "budget_completion_decided")
       context.addIssue({
         code: "custom",
         message: "completion requires an explicit budget decision"
+      });
+  });
+
+const completionWaitingSchema = z
+  .object({
+    turnId: id,
+    task: registeredTaskSnapshotSchema,
+    verifierEffectId: id,
+    fenceEpoch: z.number().int().positive(),
+    verifierResult: registeredVerifierResultSchema,
+    observationDigest: sha256Hex,
+    pollDeadlineAtMs: z.number().int().positive()
+  })
+  .strict()
+  .superRefine((waiting, context) => {
+    if (waiting.verifierResult.outcome !== "waiting")
+      context.addIssue({
+        code: "custom",
+        message: "nonterminal observation requires the waiting verifier outcome"
       });
   });
 
@@ -283,6 +307,7 @@ export const canonicalEventSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("completion_decided"), payload: completionDecisionSchema }).strict(),
+  z.object({ kind: z.literal("completion_waiting"), payload: completionWaitingSchema }).strict(),
   z.object({ kind: z.literal("continuation_linked"), payload: continuationLinkedSchema }).strict(),
   z.object({ kind: z.literal("session_adopted"), payload: sessionReassignedEventSchema }).strict(),
   z.object({ kind: z.literal("janitor_planned"), payload: janitorPlanSchema }).strict(),
@@ -366,6 +391,7 @@ export type CanonicalSessionSnapshot = {
   completedEffects: Array<Extract<CanonicalEvent, { kind: "effect_completed" }>["payload"]>;
   terminalTurns: Array<Extract<CanonicalEvent, { kind: "turn_terminal" }>["payload"]>;
   completionDecisions: Array<Extract<CanonicalEvent, { kind: "completion_decided" }>["payload"]>;
+  waitingObservations: Array<Extract<CanonicalEvent, { kind: "completion_waiting" }>["payload"]>;
   continuations: Array<Extract<CanonicalEvent, { kind: "continuation_linked" }>["payload"]>;
   adoptions: Array<Extract<CanonicalEvent, { kind: "session_adopted" }>["payload"]>;
   janitorPlans: Array<Extract<CanonicalEvent, { kind: "janitor_planned" }>["payload"]>;
@@ -386,6 +412,7 @@ function emptyCanonicalSession(): CanonicalSessionSnapshot {
     completedEffects: [],
     terminalTurns: [],
     completionDecisions: [],
+    waitingObservations: [],
     continuations: [],
     adoptions: [],
     janitorPlans: [],
@@ -420,6 +447,7 @@ export class CanonicalJournalReducer {
           next.authorizedEffects.length > 0 ||
           next.completedEffects.length > 0 ||
           next.completionDecisions.length > 0 ||
+          next.waitingObservations.length > 0 ||
           next.continuations.length > 0 ||
           next.adoptions.length > 0 ||
           next.janitorPlans.length > 0
@@ -486,6 +514,8 @@ export class CanonicalJournalReducer {
           )
             throw new Error("canonical runtime effect requires a registered task");
           if (event.payload.effectKind === "model_turn") {
+            assertNoUnresolvedWaitingObservation(next);
+            assertModelTurnAuthorizedAfterWaiting(next, event.payload);
             if (event.payload.budgetEvent?.kind !== "budget_reserved")
               throw new Error("canonical model turn requires a durable reservation");
             if (
@@ -494,6 +524,8 @@ export class CanonicalJournalReducer {
               throw new Error("canonical model effect and reservation identities conflict");
             validateRetryAuthorization(next, event.payload);
             validateAndStoreReservation(next, record.sessionId, event.payload);
+          } else if (event.payload.effectKind === "verifier") {
+            validateVerifierObservationAuthorization(next, event.payload);
           }
         } else {
           next.reconciliations.push({
@@ -572,14 +604,17 @@ export class CanonicalJournalReducer {
           }
           if (!modelAuthorization)
             throw new Error("completion decision lacks matching registered task authorization");
+          assertCompletionDecisionResolvesWaiting(next, event.payload);
           if (!event.payload.turnId || event.payload.turnId !== modelAuthorization.turnId)
             throw new Error("completion decision conflicts with its model turn");
-          const verifierAuthorization = next.authorizedEffects.find(
-            (effect) =>
-              effect.effectKind === "verifier" &&
-              effect.turnId === modelAuthorization.turnId &&
-              sameTask(effect.task, event.payload.task)
-          );
+          const verifierAuthorization = [...next.authorizedEffects]
+            .reverse()
+            .find(
+              (effect) =>
+                effect.effectKind === "verifier" &&
+                effect.turnId === modelAuthorization.turnId &&
+                sameTask(effect.task, event.payload.task)
+            );
           const verifierCompletion = verifierAuthorization
             ? next.completedEffects.find(
                 (effect) => effect.effectId === verifierAuthorization.effectId
@@ -598,8 +633,14 @@ export class CanonicalJournalReducer {
           )
             throw new Error("completion decision carries stale verifier evidence");
           validateBudgetDecision(next, record.sessionId, event.payload);
+          validateTerminalDecisionAfterWaiting(next, event.payload);
         }
         next.completionDecisions.push(event.payload);
+        break;
+      case "completion_waiting":
+        assertInitialized(next);
+        assertNonterminal(next);
+        validateAndStoreWaitingObservation(next, event.payload);
         break;
       case "continuation_linked":
         assertInitialized(next);
@@ -627,6 +668,12 @@ export class CanonicalJournalReducer {
         break;
       case "janitor_planned":
         assertInitialized(next);
+        if (
+          next.waitingObservations.some(
+            (waiting) => !hasTerminalDecisionFor(next, waiting.turnId, waiting.task)
+          )
+        )
+          throw new Error("waiting observation cannot authorize cleanup");
         if (next.janitorPlans.some((plan) => plan.planId === event.payload.planId))
           throw new Error("canonical janitor plan identity already exists");
         next.janitorPlans.push(event.payload);
@@ -677,6 +724,7 @@ type EffectAuthorization = Extract<CanonicalEvent, { kind: "effect_authorized" }
 type EffectCompletion = Extract<CanonicalEvent, { kind: "effect_completed" }>["payload"];
 type CompletionDecision = Extract<CanonicalEvent, { kind: "completion_decided" }>["payload"];
 type ContinuationLink = Extract<CanonicalEvent, { kind: "continuation_linked" }>["payload"];
+type WaitingObservation = Extract<CanonicalEvent, { kind: "completion_waiting" }>["payload"];
 
 function taskBudgetKey(task: NonNullable<EffectAuthorization["task"]>): string {
   return `${task.contractDigest}:${task.taskEvidenceDigest}`;
@@ -687,6 +735,224 @@ function sameTask(
   right: NonNullable<EffectAuthorization["task"]>
 ): boolean {
   return !!left && JSON.stringify(left) === JSON.stringify(right);
+}
+
+function sameRegisteredTask(
+  left: NonNullable<EffectAuthorization["task"]>,
+  right: NonNullable<EffectAuthorization["task"]>
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function activeFenceEpoch(snapshot: CanonicalSessionSnapshot): number | undefined {
+  return (
+    snapshot.activeBinding?.fenceEpoch ??
+    snapshot.opened?.fenceEpoch ??
+    snapshot.importedState?.session.fenceEpoch
+  );
+}
+
+function hasTerminalDecisionFor(
+  snapshot: CanonicalSessionSnapshot,
+  turnId: string,
+  task: NonNullable<EffectAuthorization["task"]>
+): boolean {
+  return snapshot.completionDecisions.some(
+    (decision) => decision.turnId === turnId && sameRegisteredTask(decision.task, task)
+  );
+}
+
+function isWaitingObservationUnresolved(
+  snapshot: CanonicalSessionSnapshot,
+  waiting: WaitingObservation
+): boolean {
+  return !hasTerminalDecisionFor(snapshot, waiting.turnId, waiting.task);
+}
+
+function assertNoUnresolvedWaitingObservation(snapshot: CanonicalSessionSnapshot): void {
+  if (
+    snapshot.waitingObservations.some((waiting) =>
+      isWaitingObservationUnresolved(snapshot, waiting)
+    )
+  )
+    throw new Error("unresolved waiting observation blocks model turn authorization");
+}
+
+function assertModelTurnAuthorizedAfterWaiting(
+  snapshot: CanonicalSessionSnapshot,
+  authorization: EffectAuthorization
+): void {
+  for (const waiting of snapshot.waitingObservations) {
+    const decision = snapshot.completionDecisions.find(
+      (candidate) =>
+        candidate.turnId === waiting.turnId && sameRegisteredTask(candidate.task, waiting.task)
+    );
+    if (!decision) continue;
+    if (
+      decision.verifierResult.outcome !== "continuation" &&
+      decision.verifierResult.outcome !== "missing_or_stale"
+    )
+      throw new Error("resolved waiting observation permanently blocks model turn authorization");
+    const continuation = snapshot.continuations.find(
+      (candidate) =>
+        candidate.sourceTurnId === waiting.turnId &&
+        candidate.input.contractDigest === waiting.task.contractDigest &&
+        candidate.input.taskEvidenceDigest === waiting.task.taskEvidenceDigest
+    );
+    if (
+      continuation &&
+      snapshot.authorizedEffects.some((effect) =>
+        matchesLinkedContinuationModel(effect, continuation, waiting.task)
+      )
+    )
+      continue;
+    if (!continuation || !matchesLinkedContinuationModel(authorization, continuation, waiting.task))
+      throw new Error("waiting continuation requires a matching linked model turn authorization");
+  }
+}
+
+function matchesLinkedContinuationModel(
+  authorization: EffectAuthorization,
+  continuation: ContinuationLink,
+  registeredTask: NonNullable<EffectAuthorization["task"]>
+): boolean {
+  return (
+    continuation.continuationTurnId === authorization.turnId &&
+    continuation.input.parentTurnId === authorization.parentTurnId &&
+    continuation.input.contractDigest === authorization.task?.contractDigest &&
+    continuation.input.taskEvidenceDigest === authorization.task?.taskEvidenceDigest &&
+    !!authorization.task &&
+    sameRegisteredTask(authorization.task, registeredTask) &&
+    authorization.budgetEvent?.kind === "budget_reserved" &&
+    JSON.stringify(authorization.budgetEvent) === JSON.stringify(continuation.reservation)
+  );
+}
+
+function assertCompletionDecisionResolvesWaiting(
+  snapshot: CanonicalSessionSnapshot,
+  decision: CompletionDecision
+): void {
+  if (
+    snapshot.waitingObservations.some(
+      (waiting) =>
+        isWaitingObservationUnresolved(snapshot, waiting) &&
+        (waiting.turnId !== decision.turnId || !sameRegisteredTask(waiting.task, decision.task))
+    )
+  )
+    throw new Error("unresolved waiting observation blocks another completion decision");
+}
+
+function validateVerifierObservationAuthorization(
+  snapshot: CanonicalSessionSnapshot,
+  authorization: EffectAuthorization
+): void {
+  const task = authorization.task;
+  if (!task || !authorization.turnId || !authorization.fenceEpoch)
+    throw new Error("verifier observation requires task, turn, and fence identity");
+  if (snapshot.terminalTurns.some((turn) => turn.turnId === authorization.turnId))
+    throw new Error("canonical turn is terminal");
+  if (hasTerminalDecisionFor(snapshot, authorization.turnId, task))
+    throw new Error("canonical completion is already terminal");
+  const model = snapshot.authorizedEffects.find(
+    (effect) =>
+      effect.effectKind === "model_turn" &&
+      effect.turnId === authorization.turnId &&
+      effect.fenceEpoch === authorization.fenceEpoch &&
+      sameTask(effect.task, task)
+  );
+  if (!model || !snapshot.completedEffects.some((effect) => effect.effectId === model.effectId))
+    throw new Error("verifier observation requires a completed active model turn");
+  const earlier = snapshot.authorizedEffects.filter(
+    (effect) =>
+      effect.effectKind === "verifier" &&
+      effect.turnId === authorization.turnId &&
+      effect.fenceEpoch === authorization.fenceEpoch &&
+      sameTask(effect.task, task)
+  );
+  if (
+    earlier.length > 0 &&
+    !snapshot.waitingObservations.some(
+      (waiting) =>
+        waiting.turnId === authorization.turnId &&
+        waiting.fenceEpoch === authorization.fenceEpoch &&
+        sameRegisteredTask(waiting.task, task) &&
+        waiting.verifierEffectId === earlier.at(-1)?.effectId
+    )
+  )
+    throw new Error("later verifier observation requires a preceding waiting record");
+}
+
+function validateAndStoreWaitingObservation(
+  snapshot: CanonicalSessionSnapshot,
+  waiting: WaitingObservation
+): void {
+  if (waiting.fenceEpoch !== activeFenceEpoch(snapshot))
+    throw new Error("waiting observation is fenced by a newer worker");
+  if (snapshot.terminalTurns.some((turn) => turn.turnId === waiting.turnId))
+    throw new Error("canonical turn is terminal");
+  if (hasTerminalDecisionFor(snapshot, waiting.turnId, waiting.task))
+    throw new Error("canonical completion is already terminal");
+  const model = snapshot.authorizedEffects.find(
+    (effect) =>
+      effect.effectKind === "model_turn" &&
+      effect.turnId === waiting.turnId &&
+      effect.fenceEpoch === waiting.fenceEpoch &&
+      sameTask(effect.task, waiting.task)
+  );
+  if (!model || !snapshot.completedEffects.some((effect) => effect.effectId === model.effectId))
+    throw new Error("waiting observation lacks a completed active model turn");
+  const verifier = snapshot.authorizedEffects.find(
+    (effect) =>
+      effect.effectId === waiting.verifierEffectId &&
+      effect.effectKind === "verifier" &&
+      effect.turnId === waiting.turnId &&
+      effect.fenceEpoch === waiting.fenceEpoch &&
+      sameTask(effect.task, waiting.task)
+  );
+  const completion = verifier
+    ? snapshot.completedEffects.find((effect) => effect.effectId === verifier.effectId)
+    : undefined;
+  if (!verifier || !completion)
+    throw new Error("waiting observation lacks a completed verifier effect");
+  if (completion.resultDigest !== canonicalValueDigest(waiting.verifierResult))
+    throw new Error("waiting observation conflicts with verifier result digest");
+  const existing = snapshot.waitingObservations.find(
+    (candidate) => candidate.verifierEffectId === waiting.verifierEffectId
+  );
+  if (existing) {
+    if (JSON.stringify(existing) !== JSON.stringify(waiting))
+      throw new Error("conflicting waiting observation replay");
+    return;
+  }
+  const prior = snapshot.waitingObservations.find(
+    (candidate) =>
+      candidate.turnId === waiting.turnId &&
+      candidate.fenceEpoch === waiting.fenceEpoch &&
+      sameRegisteredTask(candidate.task, waiting.task)
+  );
+  if (prior && prior.pollDeadlineAtMs !== waiting.pollDeadlineAtMs)
+    throw new Error("waiting observation cannot extend or change its poll deadline");
+  snapshot.waitingObservations.push(waiting);
+}
+
+function validateTerminalDecisionAfterWaiting(
+  snapshot: CanonicalSessionSnapshot,
+  decision: CompletionDecision
+): void {
+  if (hasTerminalDecisionFor(snapshot, decision.turnId ?? "", decision.task))
+    throw new Error("canonical completion is already terminal");
+  const waiting = snapshot.waitingObservations.find(
+    (candidate) =>
+      candidate.turnId === decision.turnId && sameRegisteredTask(candidate.task, decision.task)
+  );
+  if (!waiting) return;
+  if (decision.decidedAtMs === undefined)
+    throw new Error("terminal decision after waiting requires a decision time");
+  if (
+    decision.decidedAtMs >= waiting.pollDeadlineAtMs &&
+    decision.verifierResult.outcome !== "escalated"
+  )
+    throw new Error("wait deadline exhaustion requires escalation without continuation");
 }
 
 function validateRetryAuthorization(
