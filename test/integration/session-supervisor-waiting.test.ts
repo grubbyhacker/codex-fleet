@@ -197,7 +197,37 @@ function continuationBudgetReservation() {
     runtimeMs: 1
   });
   account.decideCompletion("session-1", 1_500);
-  return account.reserveTurn("session-1", "continuation-1", 1, 1_501);
+  const reservation = account.reserveTurn("session-1", "continuation-1", 1, 1_501);
+  if (reservation.kind !== "budget_reserved")
+    throw new Error("fixture continuation reservation was exhausted");
+  return reservation;
+}
+
+function authorizeContinuationModel(
+  reducer: CanonicalJournalReducer,
+  cursor: number,
+  reservation = continuationBudgetReservation()
+): void {
+  reducer.apply({
+    version: SESSION_JOURNAL_VERSION,
+    cursor,
+    transactionId: "continuation-model-auth",
+    sessionId: "session-1",
+    event: {
+      kind: "effect_authorized",
+      payload: {
+        effectId: "continuation-model-effect",
+        effectKind: "model_turn",
+        idempotencyKey: reservation.reservation.idempotencyKey,
+        targetRef: "model",
+        turnId: "turn-2",
+        parentTurnId: "turn-1",
+        fenceEpoch: 1,
+        task,
+        budgetEvent: reservation
+      }
+    }
+  });
 }
 
 describe("canonical waiting observations", () => {
@@ -336,7 +366,7 @@ describe("canonical waiting observations", () => {
     expect(reducer.snapshot().sessions["session-1"]?.budgetSnapshots).toEqual(budgetBefore);
   });
 
-  test("allows one terminal result after waiting, then refuses further observation effects", () => {
+  test("satisfied waiting resolution permanently blocks model reservation", () => {
     const reducer = new CanonicalJournalReducer();
     let cursor = open(reducer);
     cursor = modelTurn(reducer, cursor);
@@ -363,9 +393,12 @@ describe("canonical waiting observations", () => {
     expect(() => observation(reducer, cursor + 1, "verifier-3")).toThrow(
       "canonical completion is already terminal"
     );
+    expect(() => authorizeContinuationModel(reducer, cursor + 1)).toThrow(
+      "resolved waiting observation permanently blocks model turn authorization"
+    );
   });
 
-  test("requires deadline exhaustion to escalate without a continuation", () => {
+  test("escalated waiting resolution permanently blocks model reservation and continuation", () => {
     const reducer = new CanonicalJournalReducer();
     let cursor = open(reducer);
     cursor = modelTurn(reducer, cursor);
@@ -394,9 +427,37 @@ describe("canonical waiting observations", () => {
       }
     });
     expect(reducer.snapshot().sessions["session-1"]?.continuations).toHaveLength(0);
+    expect(() => authorizeContinuationModel(reducer, cursor + 1)).toThrow(
+      "resolved waiting observation permanently blocks model turn authorization"
+    );
+    expect(() =>
+      reducer.apply({
+        version: SESSION_JOURNAL_VERSION,
+        cursor: cursor + 1,
+        transactionId: "escalated-continuation-linked",
+        sessionId: "session-1",
+        event: {
+          kind: "continuation_linked",
+          payload: {
+            sourceTurnId: "turn-1",
+            continuationTurnId: "turn-2",
+            input: {
+              taskKind: task.taskKind,
+              completionContract: task.completionContract,
+              contractDigest: task.contractDigest,
+              taskEvidenceDigest: task.taskEvidenceDigest,
+              parentTurnId: "turn-1",
+              continuationDepth: 1,
+              reasonCodes: ["wait_deadline_exhausted"]
+            },
+            reservation: continuationBudgetReservation()
+          }
+        }
+      })
+    ).toThrow("continuation lacks a completed verifier continuation decision");
   });
 
-  test("refuses an old-turn observation after a completion continuation transition", () => {
+  test("requires a linked continuation before authorizing its next-depth model turn", () => {
     const reducer = new CanonicalJournalReducer();
     let cursor = open(reducer);
     cursor = modelTurn(reducer, cursor);
@@ -424,6 +485,9 @@ describe("canonical waiting observations", () => {
         }
       }
     });
+    expect(() => authorizeContinuationModel(reducer, cursor + 1)).toThrow(
+      "waiting continuation requires a matching linked model turn authorization"
+    );
     reducer.apply({
       version: SESSION_JOURNAL_VERSION,
       cursor: cursor + 1,
@@ -447,7 +511,15 @@ describe("canonical waiting observations", () => {
         }
       }
     });
-    expect(() => observation(reducer, cursor + 2, "verifier-3")).toThrow(
+    authorizeContinuationModel(reducer, cursor + 2);
+    expect(
+      reducer
+        .snapshot()
+        .sessions[
+          "session-1"
+        ]?.authorizedEffects.find((effect) => effect.effectId === "continuation-model-effect")
+    ).toBeDefined();
+    expect(() => observation(reducer, cursor + 3, "verifier-3")).toThrow(
       "canonical completion is already terminal"
     );
   });

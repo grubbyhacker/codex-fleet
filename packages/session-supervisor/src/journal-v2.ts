@@ -515,6 +515,7 @@ export class CanonicalJournalReducer {
             throw new Error("canonical runtime effect requires a registered task");
           if (event.payload.effectKind === "model_turn") {
             assertNoUnresolvedWaitingObservation(next);
+            assertModelTurnAuthorizedAfterWaiting(next, event.payload);
             if (event.payload.budgetEvent?.kind !== "budget_reserved")
               throw new Error("canonical model turn requires a durable reservation");
             if (
@@ -775,6 +776,53 @@ function assertNoUnresolvedWaitingObservation(snapshot: CanonicalSessionSnapshot
     )
   )
     throw new Error("unresolved waiting observation blocks model turn authorization");
+}
+
+function assertModelTurnAuthorizedAfterWaiting(
+  snapshot: CanonicalSessionSnapshot,
+  authorization: EffectAuthorization
+): void {
+  for (const waiting of snapshot.waitingObservations) {
+    const decision = snapshot.completionDecisions.find(
+      (candidate) =>
+        candidate.turnId === waiting.turnId && sameRegisteredTask(candidate.task, waiting.task)
+    );
+    if (!decision) continue;
+    if (
+      decision.verifierResult.outcome !== "continuation" &&
+      decision.verifierResult.outcome !== "missing_or_stale"
+    )
+      throw new Error("resolved waiting observation permanently blocks model turn authorization");
+    const continuation = snapshot.continuations.find(
+      (candidate) =>
+        candidate.sourceTurnId === waiting.turnId &&
+        candidate.input.contractDigest === waiting.task.contractDigest &&
+        candidate.input.taskEvidenceDigest === waiting.task.taskEvidenceDigest
+    );
+    if (
+      continuation &&
+      snapshot.authorizedEffects.some((effect) =>
+        matchesLinkedContinuationModel(effect, continuation)
+      )
+    )
+      continue;
+    if (!continuation || !matchesLinkedContinuationModel(authorization, continuation))
+      throw new Error("waiting continuation requires a matching linked model turn authorization");
+  }
+}
+
+function matchesLinkedContinuationModel(
+  authorization: EffectAuthorization,
+  continuation: ContinuationLink
+): boolean {
+  return (
+    continuation.continuationTurnId === authorization.turnId &&
+    continuation.input.parentTurnId === authorization.parentTurnId &&
+    continuation.input.contractDigest === authorization.task?.contractDigest &&
+    continuation.input.taskEvidenceDigest === authorization.task?.taskEvidenceDigest &&
+    authorization.budgetEvent?.kind === "budget_reserved" &&
+    JSON.stringify(authorization.budgetEvent) === JSON.stringify(continuation.reservation)
+  );
 }
 
 function assertCompletionDecisionResolvesWaiting(
