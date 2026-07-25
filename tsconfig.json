@@ -7,7 +7,6 @@
     "paths": {
       "@codex-fleet/daemon": ["packages/daemon/src/index.ts"],
       "@codex-fleet/daemon/*": ["packages/daemon/src/*"],
-      "@grubbyhacker/session-supervisor": ["packages/session-supervisor/src/index.ts"],
       "@codex-fleet/shared": ["packages/shared/src/index.ts"]
     }
   },
