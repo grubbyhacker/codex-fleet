@@ -14,7 +14,7 @@ This is a personal research tool, not a supported multi-user product. It works w
 - A read-only terminal dashboard for live fleet visibility.
 - A repo/shell task model that gives repo work isolated Fleet-owned worktrees.
 
-The product behavior is described in [docs/DESIGN.md](docs/DESIGN.md). An implementation walkthrough is in [docs/CODE_WALKTHROUGH.md](docs/CODE_WALKTHROUGH.md).
+The product behavior is described in [docs/DESIGN.md](docs/DESIGN.md). Historical POC lessons are captured in [docs/LEARNINGS.md](docs/LEARNINGS.md). An implementation walkthrough is in [docs/CODE_WALKTHROUGH.md](docs/CODE_WALKTHROUGH.md).
 
 ## What It Is Not
 
