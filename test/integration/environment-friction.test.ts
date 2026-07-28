@@ -3,32 +3,33 @@ import { describe, expect, it } from "vitest";
 import { detectEnvironmentFriction } from "../../packages/daemon/src/environment-friction.js";
 
 describe("environment friction detection", () => {
-  it("detects shell command misses", () => {
-    expect(
-      detectEnvironmentFriction({
-        workerStderr: "zsh:1: yq: command not found"
-      })
-    ).toContainEqual(
+  it.each([
+    ["command not found", "zsh:1: yq: command not found", "yq"],
+    ["POSIX not found", "/bin/sh: fd: not found", "fd"],
+    ["spawn ENOENT", "Error: spawn pnpm ENOENT", "pnpm"],
+    ["exec failure", 'exec: "rg": executable file not found in $PATH', "rg"],
+    ["fork/exec failure", "fork/exec /usr/local/bin/go: no such file or directory", "go"]
+  ])("detects shell %s", (_name, stderr, tool) => {
+    expect(detectEnvironmentFriction({ workerStderr: stderr })).toContainEqual(
       expect.objectContaining({
         kind: "missing_command",
         source: "worker_stderr",
         runtime: "shell",
-        tool: "yq"
+        tool
       })
     );
   });
 
-  it("detects missing Python modules", () => {
-    expect(
-      detectEnvironmentFriction({
-        finalResponse: "Traceback...\nModuleNotFoundError: No module named 'yaml'"
-      })
-    ).toContainEqual(
+  it.each([
+    ["ModuleNotFoundError", "ModuleNotFoundError: No module named 'yaml'", "yaml"],
+    ["ImportError", "ImportError: No module named 'tomllib'", "tomllib"]
+  ])("detects Python %s", (_name, workerError, module) => {
+    expect(detectEnvironmentFriction({ workerError })).toContainEqual(
       expect.objectContaining({
         kind: "missing_module",
-        source: "final_response",
+        source: "worker_error",
         runtime: "python",
-        module: "yaml"
+        module
       })
     );
   });
@@ -37,6 +38,7 @@ describe("environment friction detection", () => {
     const signals = detectEnvironmentFriction({
       workerError: [
         "Error: Cannot find module 'js-yaml'",
+        "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'kleur' imported from /app/index.mjs",
         "LoadError: cannot load such file -- psych"
       ].join("\n")
     });
@@ -53,8 +55,44 @@ describe("environment friction detection", () => {
       expect.objectContaining({
         kind: "missing_module",
         source: "worker_error",
+        runtime: "node",
+        module: "kleur"
+      })
+    );
+    expect(signals).toContainEqual(
+      expect.objectContaining({
+        kind: "missing_module",
+        source: "worker_error",
         runtime: "ruby",
         module: "psych"
+      })
+    );
+  });
+
+  it.each([
+    ["missing tool", 'go: no such tool "compile"', "missing_command", "tool", "compile"],
+    ["missing toolchain", "go: toolchain not available", "missing_command", "tool", "go"],
+    [
+      "unresolved module",
+      "no required module provides package example.com/acme/widget; to add it:",
+      "missing_module",
+      "module",
+      "example.com/acme/widget"
+    ],
+    [
+      "unresolved GOPATH import",
+      'cannot find package "example.com/acme/legacy" in any of:',
+      "missing_module",
+      "module",
+      "example.com/acme/legacy"
+    ]
+  ])("detects Go %s", (_name, workerStderr, kind, property, value) => {
+    expect(detectEnvironmentFriction({ workerStderr })).toContainEqual(
+      expect.objectContaining({
+        kind,
+        source: "worker_stderr",
+        runtime: "go",
+        [property]: value
       })
     );
   });
@@ -90,5 +128,14 @@ describe("environment friction detection", () => {
       module: "yaml"
     });
     expect(signals[0]?.evidence.length).toBeLessThanOrEqual(240);
+  });
+
+  it("does not treat final-response prose that quotes an error as friction", () => {
+    expect(
+      detectEnvironmentFriction({
+        finalResponse:
+          "The test named \"returns ModuleNotFoundError: No module named 'yaml'\" is expected to pass."
+      })
+    ).toEqual([]);
   });
 });

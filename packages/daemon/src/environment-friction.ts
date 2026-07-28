@@ -5,7 +5,7 @@ export type EnvironmentFrictionSource = "final_response" | "worker_stderr" | "wo
 export type EnvironmentFrictionPayload = {
   kind: EnvironmentFrictionKind;
   source: EnvironmentFrictionSource;
-  runtime?: "python" | "node" | "ruby" | "shell" | "unknown";
+  runtime?: "go" | "python" | "node" | "ruby" | "shell" | "unknown";
   tool?: string;
   module?: string;
   evidence: string;
@@ -80,11 +80,21 @@ function detectLine(source: EnvironmentFrictionSource, line: string): Environmen
     });
   }
 
+  // A final response is agent-authored prose, which can quote errors from a test or a
+  // discussion without representing an environment failure. Only inspect the raw worker
+  // channels for failure signatures; keep the explicit fallback report above unchanged.
+  if (source === "final_response") {
+    return signals;
+  }
+
   const shellCommand = firstMatch(line, [
     /(?:^|\s)([\w./+-]+):\s+command not found\b/i,
+    /(?:^|\s)([\w./+-]+):\s+not found\b/i,
     /\bcommand not found:\s+([\w./+-]+)/i,
     /\b(?:spawn|exec):?\s+([\w./+-]+)\s+ENOENT\b/i,
-    /\bENOENT\b.*?\b(?:spawn|exec)\s+([\w./+-]+)/i
+    /\bENOENT\b.*?\b(?:spawn|exec)\s+([\w./+-]+)/i,
+    /\bexec:\s+["']?([^"'\s:]+)["']?:\s+executable file not found/i,
+    /\bfork\/exec\s+([^:\s]+):\s+no such file or directory\b/i
   ]);
   if (shellCommand) {
     signals.push({
@@ -113,7 +123,9 @@ function detectLine(source: EnvironmentFrictionSource, line: string): Environmen
 
   const nodeModule = firstMatch(line, [
     /Error:\s+Cannot find module ['"]([^'"]+)['"]/,
-    /\bCannot find package ['"]([^'"]+)['"]/
+    /\bCannot find package ['"]([^'"]+)['"](?:\s+imported from)?/,
+    /\bERR_MODULE_NOT_FOUND\b.*?\bCannot find module ['"]([^'"]+)['"]/,
+    /\bERR_MODULE_NOT_FOUND\b.*?\bCannot find package ['"]([^'"]+)['"]/
   ]);
   if (nodeModule) {
     signals.push({
@@ -132,6 +144,34 @@ function detectLine(source: EnvironmentFrictionSource, line: string): Environmen
       source,
       runtime: "ruby",
       module: rubyModule,
+      evidence
+    });
+  }
+
+  const goTool = firstMatch(line, [/\bgo:\s+no such tool ['"]([^'"]+)['"]/i]);
+  const missingGoToolchain =
+    /\bgo:\s+(?:cannot find (?:the )?(?:GOROOT|GOTOOLDIR)|toolchain not available)\b/i.test(line);
+  if (goTool || missingGoToolchain) {
+    signals.push({
+      kind: "missing_command",
+      source,
+      runtime: "go",
+      tool: goTool ?? "go",
+      evidence
+    });
+  }
+
+  const goModule = firstMatch(line, [
+    /\bno required module provides package\s+([^;\s]+)/i,
+    /\bcannot find package ['"]([^'"]+)['"]\s+in any of:/i,
+    /\bpackage\s+([^\s]+)\s+is not in std\s+\(/i
+  ]);
+  if (goModule) {
+    signals.push({
+      kind: "missing_module",
+      source,
+      runtime: "go",
+      module: goModule,
       evidence
     });
   }
