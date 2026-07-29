@@ -417,7 +417,11 @@ async function runDashboard(): Promise<void> {
   renderer.root.add(text);
   renderer.start();
 
+  let destroyed = false;
   const refresh = async () => {
+    if (destroyed) {
+      return;
+    }
     const previousTaskId = selectedTaskId;
     try {
       const options = {
@@ -430,6 +434,9 @@ async function runDashboard(): Promise<void> {
         taskId: selectedTaskId
       };
       const data = await loadDashboardData(options, dataCache);
+      if (destroyed) {
+        return;
+      }
       lastData = data;
       const nextSelected = selectedTask(data, options)?.id;
       if (previousTaskId !== nextSelected) {
@@ -449,6 +456,9 @@ async function runDashboard(): Promise<void> {
         focus
       });
     } catch (error) {
+      if (destroyed) {
+        return;
+      }
       text.content = renderDashboardError(error, parseOptions());
     }
   };
@@ -568,7 +578,10 @@ async function runDashboard(): Promise<void> {
   });
 
   const timer = setInterval(() => void refresh(), dashboardRefreshIntervalMs);
-  renderer.on("destroy", () => clearInterval(timer));
+  renderer.on("destroy", () => {
+    destroyed = true;
+    clearInterval(timer);
+  });
 }
 
 function enterTerminalDashboard(): void {
